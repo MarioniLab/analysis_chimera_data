@@ -1,0 +1,106 @@
+---
+title: "perturbSuite_DE_dynamic"
+output:
+  BiocStyle::html_document:
+    code_folding: hide
+    number_sections: yes
+    toc: yes  
+---
+
+This notebook performs perturbSuite_DE_dynamic for specified chimera (T or Mixl1) and specified lineage. 
+
+# Set-up and loading data and intermediate results
+
+```{r, echo=FALSE, output=FALSE, message=FALSE}
+target <- params[2]
+lineage <- params[3]
+
+source("core_functions_dynamic.R")
+source("core_functions_DA_testing_general.R")
+source("chimera_core_functions_big_atlas.R")
+library(ggplot2)
+library(ggrepel)
+
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraTarget <- readRDS(paste0("../results/chimera",target,"_2020_extended_mapping_rev.rds"))
+correlation_pseudotime_WT <- readRDS("results_no_split/correlation_pseudotime_WT.rds")
+correlation_pseudotime_target <- readRDS(paste0("results_no_split/correlation_pseudotime_",target,".rds"))
+lineages <- read.table("lineage_names.txt")$V1
+names(correlation_pseudotime_WT) <- lineages
+names(correlation_pseudotime_target) <- lineages
+correlation_pseudotime_WT <- correlation_pseudotime_WT[unlist(lapply(correlation_pseudotime_WT, function(x) !(is.null(x))))]
+correlation_pseudotime_target <- correlation_pseudotime_target[unlist(lapply(correlation_pseudotime_target, function(x) !(is.null(x))))]
+
+set.seed(44)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE
+  
+)
+options(datatable.fread.datatable=FALSE)
+library(SingleCellExperiment)
+library(data.table)
+library(destiny)
+library(scran)
+library(scater)
+library(batchelor)
+```
+
+# Remapping lineage and stage using correlation-based analysis on the specific trajectory only
+
+The original cell-type classification for the chimera data is based on data integration between the entire chimera and the reference atlas. We now refine this by considering only the cells assigned to the limb mesoderm lineage. 
+
+```{r}
+
+atlas_meta <- readRDS("../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
+atlas_sce <- readRDS("../data/big_atlas/big_atlas.rds")
+cor_target <- readRDS(paste0("results_no_split/",lineage,"/",lineage,"_cor_cells_",target,".rds"))
+cor_WT <- readRDS(paste0("results_no_split/",lineage,"/",lineage,"_cor_cells_WT.rds"))
+correlation_pseudotime_lineages_target <- atlas_meta$lineage.clustering[match(names(correlation_pseudotime_target),colnames(atlas_sce))]
+
+chimeraT <- refine_celltype_stage(chimeraTarget,cor_target)
+chimeraWT <- refine_celltype_stage(chimeraWT,cor_WT)
+```
+
+
+Differential expression 
+
+```{r }
+sce_case <- chimeraTarget
+sce_control <- chimeraWT
+gene_conv <-  read.table("../data/genes.tsv")
+rownames(sce_case) <- gene_conv$V2[match(rownames(sce_case),gene_conv$V1)]
+rownames(sce_control) <- gene_conv$V2[match(rownames(sce_control),gene_conv$V1)]
+sce_case$perturbed <- sce_case$tomato
+sce_control$perturbed <- sce_control$tomato
+sce_case <- logNormCounts(sce_case,size.factors=sce_case$sizeFactor)
+sce_control <- logNormCounts(sce_control,size.factors=sce_control$sizeFactor)
+
+pseudotime_case <- correlation_pseudotime_target[[lineage]]
+pseudotime_control <- correlation_pseudotime_WT[[lineage]]
+gene_conv <-  read.table("../data/genes.tsv")
+gene_file <- list.files(paste0("results_no_split/",lineage),pattern="genes_sublineage")
+temporal_genes <- read.table(paste0("results_no_split/",lineage,"/",gene_file))$V1
+temporal_genes <- gene_conv$V2[match(temporal_genes,gene_conv$V1)]
+
+```
+
+
+
+```{r}
+DE_expression_dynamic_target_lineage <- DE_expression_dynamic(sce_case[temporal_genes,],sce_control[temporal_genes,],pseudotime_case,pseudotime_control)
+
+df_dynamic <- DE_expression_dynamic_target_lineage[,c("dynamic_effect.gene","dynamic_effect_contrasted_with_control.z_value","dynamic_effect_contrasted_with_control.FDR","dynamic_effect.z_value", "dynamic_effect.FDR")]
+colnames(df_dynamic) <- c("gene","z_score_contrasted_with_control","FDR_contrast","z_score_case_only","FDR_case_only")
+df_dynamic <- df_dynamic[!(is.na(df_dynamic$FDR_contrast)),]
+df_dynamic$gene <- sapply(df_dynamic$gene,function(x) strsplit(x,"-")[[1]][1])
+
+dir.create("DE_dynamic_output_files")
+
+write.table(df_dynamic[df_dynamic$FDR_contrast <0.1&df_dynamic$FDR_case_only<0.1,], file=paste0("DE_dynamic_output_files/DE_expression_dynamic_",target,"_",lineage,".csv"),sep=",",row.names=FALSE,col.names=TRUE)
+
+# write.table(df_dynamic, file=paste0("DE_dynamic_output_files/all_DE_expression_dynamic_",target,"_",lineage,".csv"),sep=",",row.names=FALSE,col.names=TRUE)
+```
+

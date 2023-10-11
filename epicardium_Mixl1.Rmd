@@ -1,0 +1,385 @@
+---
+title: "Mixl1 analysis epicardium"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes  
+    keep_md: yes
+---
+
+# Loading  the data
+
+```{r,echo=FALSE,output=FALSE}
+source("core_functions_dynamic.R")
+source("core_functions_DA_testing_general.R")
+source("chimera_core_functions_big_atlas.R")
+library(ggplot2)
+library(Polychrome)
+library(progeny)
+library(ggrepel)
+library(MAYA)
+
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+correlation_pseudotime_WT <- readRDS("results_no_split/correlation_pseudotime_WT.rds")
+correlation_pseudotime_Mixl1 <- readRDS("results_no_split/correlation_pseudotime_Mixl1.rds")
+Celltypes <- read.table("lineage_names.txt")$V1
+names(correlation_pseudotime_WT) <- Celltypes
+names(correlation_pseudotime_Mixl1) <- Celltypes
+correlation_pseudotime_WT <- correlation_pseudotime_WT[unlist(lapply(correlation_pseudotime_WT, function(x) !(is.null(x))))]
+correlation_pseudotime_Mixl1 <- correlation_pseudotime_Mixl1[unlist(lapply(correlation_pseudotime_Mixl1, function(x) !(is.null(x))))]
+```
+
+```{r,echo=F,output=F}
+set.seed(44)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    dev = c("pdf","png"),
+    dpi=300
+)
+options(datatable.fread.datatable=FALSE)
+library(SingleCellExperiment)
+library(data.table)
+library(destiny)
+library(scran)
+library(scater)
+library(batchelor)
+
+
+```
+
+Remapping the celltype using correlation-based analysis on the trajectory only
+
+```{r,echo=F,output=F}
+Celltype <- "Epicardium"
+atlas_meta <- readRDS("../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
+atlas_sce <- readRDS("../data/big_atlas/big_atlas.rds")
+cor_Mixl1 <- readRDS(paste0("results_no_split/",Celltype,"/",Celltype,"_cor_cells_Mixl1.rds"))
+cor_WT <- readRDS(paste0("results_no_split/",Celltype,"/",Celltype,"_cor_cells_WT.rds"))
+correlation_pseudotime_celltypes_Mixl1 <- atlas_meta$celltype.clustering[match(names(correlation_pseudotime_Mixl1),colnames(atlas_sce))]
+
+refine_celltype_stage <- function(sce_chimera,cor_matrix){
+    k.mapped <- matrix(0,nrow=ncol(cor_matrix),10)
+    for (j in 1:ncol(cor_matrix))
+    {
+      k.mapped[j,] <- rownames(cor_matrix)[order(cor_matrix[,j],decreasing=TRUE)[1:10]]
+    }
+  celltypes <-  matrix(0,nrow=ncol(cor_matrix),ncol=10)
+  stages <-   matrix(0,nrow=ncol(cor_matrix),ncol=10)
+  for (j in 1:ncol(cor_matrix))
+  {
+    xx <- match(k.mapped[j,], atlas_meta$cell)
+    celltypes[j,] <- atlas_meta$celltype.clustering[xx]
+    stages[j,] <- as.vector(atlas_meta$stage)[xx]
+  }
+  
+  celltype.mapped <- rep("",nrow(celltypes))
+  for (j in 1:nrow(celltypes)){
+    celltype.mapped[j] <- getmode(celltypes[j,],1:ncol(celltypes))
+  }
+  stage.mapped <- rep("",nrow(stages))
+  for (j in 1:nrow(stages)){
+    stage.mapped[j] <- getmode(stages[j,],1:ncol(stages))
+  }
+  sce_chimera$stage.refined <- NA
+  sce_chimera$stage.refined[match(colnames(cor_matrix),colnames(sce_chimera))] <- stage.mapped
+  sce_chimera$celltype.refined <- NA
+  sce_chimera$celltype.refined[match(colnames(cor_matrix),colnames(sce_chimera))] <- celltype.mapped
+  return(sce_chimera)
+}
+
+
+
+
+chimeraMixl1 <- refine_celltype_stage(chimeraMixl1,cor_Mixl1)
+chimeraWT <- refine_celltype_stage(chimeraWT,cor_WT)
+```
+
+
+Plotting pseudotime for epicardium trajectory 
+
+```{r diffusion_epicardium}
+diffusion_map_epicardium <- readRDS(paste0("results_no_split/",Celltype,"/Epicardium_diffusion_map_sublineage_Lateral_plate_mesoderm.rds"))
+stages <- atlas_meta$stage[match(names(diffusion_map_epicardium$DC1),atlas_meta$cell)]
+stages_double <- as.double(substring(stages,2,10))
+cors <- cor(diffusion_map_epicardium@eigenvectors,stages_double)
+diffusion_map_epicardium@eigenvectors[,cors <0 ] <- -diffusion_map_epicardium@eigenvectors[,cors <0 ]
+
+celltype <- atlas_meta$celltype.clustering[match(names(diffusion_map_epicardium$DC1),atlas_meta$cell)]
+Mixl1_expression <- logcounts(atlas_sce)["ENSMUSG00000026497",match(names(diffusion_map_epicardium$DC1),atlas_meta$cell)]
+xx <- sample(1:length(diffusion_map_epicardium$DC1))
+tmp <- data.frame(DC1 = eigenvectors(diffusion_map_epicardium)[xx, 1],
+                    DC2 = eigenvectors(diffusion_map_epicardium)[xx, 2],
+                    celltype = celltype[xx],
+                    dpt = eigenvectors(diffusion_map_epicardium)[xx, 1],
+                  stage=stages[xx],
+                  Mixl1_expression=Mixl1_expression[xx])
+  p1 <- ggplot(tmp, aes(x = DC1, y = DC2, colour = celltype)) +
+    geom_point(size=2,alpha=1) + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 2") +
+    theme_classic(base_size=16) + theme(legend.position = "bottom",legend.box="vertical",legend.margin=margin())+
+    labs(color="")+ guides(color = guide_legend(nrow=3,override.aes = list(size = 3,alpha=1))) +scale_color_colorblind()#+ scale_color_manual(values=celltype_colours_final[unique(tmp$celltype)])
+  print(p1)
+  
+  p2 <- ggplot(tmp, aes(x = DC1, y = DC2, colour = as.double(substring(stage,2)))) +
+    geom_point(alpha=0.5,size=2) + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 2") +
+    theme_classic(base_size=11) +scale_color_viridis_c(breaks=seq(7.5,9.25,by=0.25))+ theme(legend.position = "bottom",legend.box="vertical",legend.key.width = unit(2.5, "cm"),legend.margin=margin())+
+    labs(color="")
+  print(p2)
+  
+  p3 <- ggplot(tmp, aes(x = DC1, y = DC2, colour = DC1)) +
+    geom_point(alpha=0.5,size=2) + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 2") +
+    theme_classic(base_size=11) +scale_color_viridis_c(option="inferno")+ theme(legend.position = "bottom",legend.box="vertical",legend.key.width = unit(2.5, "cm"),legend.margin=margin())+
+    labs(color="")
+  print(p3)
+```
+Histogram of cell types along pseudotime
+
+```{r histograms_diffusion_epicardium}
+ p1 <- ggplot(tmp, aes(x = DC1,fill = celltype)) +
+    geom_histogram(alpha=1) + 
+    xlab("Diffusion component 1") +
+    theme_classic(base_size=16) + theme(legend.position = "bottom",legend.box="vertical",legend.margin=margin())+
+    labs(color="")+ guides(fill = guide_legend(nrow=3,override.aes = list(size = 3,alpha=1)))+ scale_fill_colorblind()
+  print(p1)
+
+```
+Plotting trajectory on UMAP
+
+
+```{r umap_epicardium_trajectory_2}
+sce_temp <- cbind(atlas_sce,atlas_sce[,colnames(atlas_sce)%in%names(diffusion_map_epicardium$DC1)])
+sce_temp$celltype.clustering <- atlas_meta$celltype.clustering[match(colnames(sce_temp),atlas_meta$cell)]
+sce_temp$group <- c(rep(NA,ncol(atlas_sce)),paste0(sce_temp$celltype.clustering[-(1:(ncol(atlas_sce)))],"_epicardium_lineage"))
+plotReducedDim(sce_temp,colour_by = "group",dimred="umap",point_size=1)+scale_color_colorblind(na.value="lightgrey")
+rm(sce_temp)
+gc()
+```
+
+Plotting Mixl1 expression along epicardium lineage
+
+```{r Mixl1_expression_DC1}
+p4 <- ggplot(tmp[order(tmp$Mixl1_expression),], aes(x = DC1, y =  Mixl1_expression)) +
+    geom_point(size=3,alpha=0.0001)+
+    xlab("Diffusion component 1") + 
+    ylab("Mixl1 expression (log2+1)")  + geom_smooth(size=3)+ geom_point(data=tmp,mapping=aes(x=DC1,y=Mixl1_expression,color=stage),size=3,alpha=0.3)+
+    theme_classic(base_size=16) +scale_color_viridis_d()+ theme(legend.position = "bottom",legend.box="vertical",legend.margin=margin())+
+    labs(color="") + guides(color = guide_legend(override.aes = list(size = 6,alpha=1) ) )
+  print(p4)
+  
+```
+
+# Differential expression
+
+```{r }
+sce_case <- chimeraMixl1
+sce_case$perturbed <- sce_case$tomato
+sce_control <- chimeraWT
+sce_control$perturbed <- sce_control$tomato
+pseudotime_case <- correlation_pseudotime_Mixl1[["Epicardium"]]
+pseudotime_control <-correlation_pseudotime_WT[["Epicardium"]]
+sce_case <- logNormCounts(sce_case,size_factors=sce_case$sizeFactor)
+sce_control <- logNormCounts(sce_control,size_factors=sce_control$sizeFactor)
+gene_conv <-  read.table("../data/genes.tsv")
+rownames(sce_case) <- gene_conv$V2[match(rownames(sce_case),gene_conv$V1)]
+rownames(sce_control) <- gene_conv$V2[match(rownames(sce_control),gene_conv$V1)]
+
+Celltype <- "Epicardium"
+gene_file <- list.files(paste0("results_no_split/",Celltype),pattern="genes_sublineage")
+temporal_genes <- read.table(paste0("results_no_split/",Celltype,"/",gene_file))$V1
+temporal_genes <- gene_conv$V2[match(temporal_genes,gene_conv$V1)]
+```
+
+## Dynamic changes for epicardium
+
+```{r dynamic_Mixl1_epicardium}
+DE_expression_dynamic_Mixl1_epicardium <- DE_expression_dynamic(sce_case[temporal_genes,],sce_control[temporal_genes,],pseudotime_case,pseudotime_control)
+print(volcano_plot_dynamic(DE_expression_dynamic_Mixl1_epicardium,FDR_dynamic=0.1,max_highlight=40) + ggtitle("Dynamic Mixl1 epicardium"))
+
+df_dynamic <- DE_expression_dynamic_Mixl1_epicardium[,c("dynamic_effect.gene","dynamic_effect_contrasted_with_control.z_value","dynamic_effect_contrasted_with_control.FDR","dynamic_effect.z_value", "dynamic_effect.FDR")]
+colnames(df_dynamic) <- c("gene","z_score_contrasted_with_control","FDR_contrast","z_score_case_only","FDR_case_only")
+df_dynamic$gene <- sapply(df_dynamic$gene,function(x) strsplit(x,"-")[[1]][1])
+
+write.table(df_dynamic[df_dynamic$FDR_contrast <0.1&df_dynamic$FDR_case_only<0.1,], file="DE_expression_dynamic_Mixl1_epicardium.csv",sep=",",row.names=TRUE,col.names=TRUE)
+
+write.table(df_dynamic,file="DE_expression_dynamic_Mixl1_epicardium_all.csv",sep=",",row.names=TRUE,col.names=TRUE)
+
+dynamic_DE_genes <- df_dynamic$gene[df_dynamic$FDR_case_only<0.1&df_dynamic$FDR_contrast<0.1]
+```
+
+### Dynamic changes on pathway basis
+
+Computing MAYA pathway scores
+
+```{r}
+library(babelgene)
+ortho <- orthologs(genes = rownames(chimeraMixl1), species = "mouse", human = FALSE)
+
+rowData(chimeraMixl1)$human_ortholog <- ortho$human_symbol[match(rownames(chimeraMixl1),ortho$ensembl)]
+rowData(chimeraWT)$human_ortholog <- ortho$human_symbol[match(rownames(chimeraWT),ortho$ensembl)]
+counts_Mixl1 <- counts(chimeraMixl1[,!(is.na(chimeraMixl1$celltype.refined))])
+colnames(counts_Mixl1) <- paste0(colnames(counts_Mixl1),"_Mixl1")
+rownames(counts_Mixl1) <- rowData(chimeraMixl1)$human_ortholog 
+perturbed_Mixl1 <- chimeraMixl1[,!(is.na(chimeraMixl1$celltype.refined))]$tomato
+celltype_Mixl1 <- chimeraMixl1[,!(is.na(chimeraMixl1$celltype.refined))]$celltype.refined
+
+counts_WT <- counts(chimeraWT[,!(is.na(chimeraWT$celltype.refined))])
+rownames(counts_WT) <- rowData(chimeraWT)$human_ortholog 
+perturbed_WT <- chimeraWT[,!(is.na(chimeraWT$celltype.refined))]$tomato
+celltype_WT <- chimeraWT[,!(is.na(chimeraWT$celltype.refined))]$celltype.refined
+colnames(counts_WT) <- paste0(colnames(counts_WT),"_WT")
+
+MAYA_Mixl1_WT <- MAYA_pathway_analysis(expr_mat=cbind(counts_Mixl1[intersect(rownames(counts_Mixl1),rownames(counts_WT)),],
+                    counts_WT[intersect(rownames(counts_Mixl1),rownames(counts_WT)),]),
+                                        modules_list = "hallmark",
+                                        is_logcpm=F)
+MAYA_activity_matrix <- MAYA_Mixl1_WT$activity_matrix
+activity_Mixl1 <- MAYA_activity_matrix[,colnames(counts_Mixl1)]
+activity_WT <- MAYA_activity_matrix[,colnames(counts_WT)] 
+```
+
+Dynamic DE expression of MAYA pathway scores
+
+```{r dynamic_Mixl1_epicardium_MAYA}
+sce_case <- SingleCellExperiment(assays=list(logcounts=activity_Mixl1),
+                                   colData=list(perturbed=perturbed_Mixl1))
+sce_control <- SingleCellExperiment(assays=list(logcounts=activity_WT),
+                                 colData=list(perturbed=perturbed_WT))
+
+pseudotime_case <- correlation_pseudotime_Mixl1[["Epicardium"]][sapply(colnames(sce_case),function(x) strsplit(x,"_Mixl1")[[1]][1])]
+pseudotime_control <- correlation_pseudotime_WT[["Epicardium"]][sapply(colnames(sce_control),function(x) strsplit(x,"_WT")[[1]][1])]
+
+names(pseudotime_case) <- paste0(names(pseudotime_case),"_Mixl1")
+names(pseudotime_control) <- paste0(names(pseudotime_control),"_WT")
+
+DE_expression_dynamic_Mixl1_epicardium_MAYA <- DE_expression_dynamic(sce_case,sce_control,pseudotime_case,pseudotime_control)
+print(volcano_plot_dynamic(DE_expression_dynamic_Mixl1_epicardium_MAYA,FDR_dynamic=0.1,max_highlight=25) + ggtitle("Dynamic Mixl1 epicardium"))
+```
+
+## Genes with main contribution to pathway scores and dynamically DE themselves for most DE pathway
+
+We identify and plot histograms of genes that are both in pathways that are dynamically DE and dynamically DE themselves on the gene level for the most DE pathway (Myogenesis). 
+
+```{r hallmark_sets_geneDE_dynamic}
+dynamic_DE_genes_converted <- ortho$human_symbol[ortho$symbol%in%dynamic_DE_genes]
+hallmark_sets <- "HALLMARK_MYOGENESIS"
+dynamic_DE_gene_and_pathway <- c()
+
+for (j in 1:length(hallmark_sets)){
+  gene_contributions <- MAYA_Mixl1_WT$PCA_obj[[hallmark_sets[j]]]$gene_contrib
+  gene_contributions <- gene_contributions[,colnames(gene_contributions)%in%dynamic_DE_genes_converted,drop=F]
+  for (k in 1:nrow(gene_contributions)){
+     gene_contributions_2 <- gene_contributions[k,]
+     names(gene_contributions_2) <- colnames(gene_contributions)
+     names(gene_contributions_2) <- ortho$symbol[match(names(gene_contributions_2),ortho$human_symbol)]
+     gene_contributions_1 <- gene_contributions_2[order(gene_contributions_2,decreasing=TRUE)[1:min(50,length(gene_contributions_2))]]
+    print(gene_contributions[k,][order(gene_contributions[k,],decreasing=TRUE)[1:min(50,length(gene_contributions[k,]))]])
+  pp2 <- ggplot(mapping=aes(x=factor(names(gene_contributions_1),levels=names(gene_contributions_1)),y=gene_contributions_1,fill=gene_contributions_1>0)) + geom_bar(stat="identity")+theme_classic()+ggtitle(paste0(hallmark_sets[j],"-mode ",k))+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+xlab("")+ylab("PC weight of gene")+
+    scale_fill_manual(values=c("TRUE"="blue","FALSE"="red"))+theme(legend.position = "none")
+  print(pp2)
+  dynamic_DE_gene_and_pathway <- c(dynamic_DE_gene_and_pathway,names(gene_contributions_1)[1:3])
+  }
+ 
+}
+dynamic_DE_gene_and_pathway <- unique(dynamic_DE_gene_and_pathway)
+```
+
+
+
+## Static differential expression per cell type
+
+```{r static_epicardium_per_celltype}
+DE_genes_per_celltype <- list()
+celltypes_along_trajectory <- unique(tmp$celltype)
+for (j in 1:length(celltypes_along_trajectory)){
+  sce_case <- chimeraMixl1[intersect(rownames(chimeraMixl1),gene_conv$V1[gene_conv$V2 %in% temporal_genes]),!(is.na(chimeraMixl1$celltype.refined))]
+  sce_case <- sce_case[,sce_case$celltype.refined==celltypes_along_trajectory[j]]
+  sce_case$perturbed <- sce_case$tomato
+  sce_control <- chimeraWT[,!(is.na(chimeraWT$celltype.refined))]
+  sce_control <- sce_control[,sce_control$celltype.refined==celltypes_along_trajectory[j]]
+  sce_control$perturbed <- sce_control$tomato
+  if (ncol(sce_case)>=20 & ncol(sce_control)>=20){
+    pseudotime_case <- correlation_pseudotime_Mixl1[["Epicardium"]]
+    pseudotime_control <-correlation_pseudotime_WT[["Epicardium"]]
+    sce_case <- logNormCounts(sce_case,size_factors=sce_case$sizeFactor)
+    sce_control <- logNormCounts(sce_control,size_factors=sce_control$sizeFactor)
+    gene_conv <-  read.table("../data/genes.tsv")
+    rownames(sce_case) <- gene_conv$V2[match(rownames(sce_case),gene_conv$V1)]
+    rownames(sce_control) <- gene_conv$V2[match(rownames(sce_control),gene_conv$V1)]
+    
+    DE_expression_static_Mixl1_epicardium <- DE_expression_static(sce_case[temporal_genes,],sce_control[temporal_genes,])
+    
+    print(volcano_plot_static(DE_expression_static_Mixl1_epicardium,FDR_static=0.1,max_highlight=25) + ggtitle(paste0("Mixl1: ",celltypes_along_trajectory[j])))
+    
+  df_static <- DE_expression_static_Mixl1_epicardium[,c("static_effect.gene","static_effect_contrasted_with_control.estimate","static_effect_contrasted_with_control.FDR","static_effect.estimate", "static_effect.FDR")]
+    colnames(df_static) <- c("gene","lfc_contrasted_with_control","FDR_contrast","lfc_case_only","FDR_case_only")
+    write.table(df_static[df_static$FDR_contrast <0.1&df_static$FDR_case_only<0.1,], file=paste0("DE_expression_static_Mixl1_epicardium_",celltypes_along_trajectory[j],".csv"),sep=",",row.names=TRUE,col.names=TRUE)
+  write.table(df_static, file=paste0("DE_expression_static_Mixl1_epicardium_all_",celltypes_along_trajectory[j],".csv"),sep=",",row.names=TRUE,col.names=TRUE)
+
+  DE_genes_per_celltype[[j]] <- df_static[df_static$FDR_contrast <0.1&df_static$FDR_case_only<0.1,]$gene
+}}
+names(DE_genes_per_celltype) <- celltypes_along_trajectory
+```
+
+Expression plots of top DE genes that are also pathway genes flagged up in the MAYA analysis. 
+
+```{r expression_plots_dynamic}
+dynamic_Mixl1 <- chimeraMixl1[,names(correlation_pseudotime_Mixl1[["Epicardium"]])]
+dynamic_Mixl1$pseudotime <- correlation_pseudotime_Mixl1[["Epicardium"]][colnames(dynamic_Mixl1)]
+```
+
+
+Plot gene expression as a function of refined mapped stage
+
+```{r gex_pseudotime_tomato_2,fig.height=4}
+dynamic_DE_gene_and_pathway <- sort(unique(c(dynamic_DE_gene_and_pathway,c("Tbx18","Sfrp5","Mef2c"))))
+for (j in 1:length(dynamic_DE_gene_and_pathway)){
+  df <- data.frame(stage=as.double(sapply(dynamic_Mixl1$stage.refined,function(x) substring(x,2,nchar(x)))),
+        gex=as.vector(logcounts(dynamic_Mixl1[gene_conv$V1[gene_conv$V2==dynamic_DE_gene_and_pathway[j]],])),
+        tomato=dynamic_Mixl1$tomato)
+  colnames(df)[3] <- "tdTom"
+  df[df[,3] == FALSE,3] <- "negative"
+  df[df[,3] == TRUE,3] <- "positive"
+print(ggplot(df,aes(x=stage,y=gex,color=tdTom,fill=tdTom)) + geom_point()+geom_smooth()+theme_classic(base_size=18)+ggtitle(dynamic_DE_gene_and_pathway[j])+
+        scale_color_manual(values=c("positive"="red","negative"="darkblue"))+scale_fill_manual(values=c("positive"="red","negative"="darkblue")))
+}
+
+```
+
+Plot pathway activity as a function of refined mapped stage
+
+```{r pathway_pseudotime_tomato,fig.height=4}
+sce_case <- SingleCellExperiment(assays=list(logcounts=activity_Mixl1),
+                                   colData=list(tomato=perturbed_Mixl1))
+                                 
+sce_case$stage.refined <- chimeraMixl1[,sapply(colnames(sce_case),function(x) strsplit(x,"_")[[1]][1])]$stage.refined
+sce_case$pseudotime <- correlation_pseudotime_Mixl1[["Epicardium"]][sapply(colnames(sce_case),function(x) strsplit(x,"_Mixl1")[[1]][1])]
+
+pathways_plot <- c("HALLMARK_MYOGENESIS_mode1","HALLMARK_E2F_TARGETS_mode1","HALLMARK_MYC_TARGETS_V1_mode1")
+for (j in 1:length(pathways_plot)){
+  df <- data.frame(
+        gex=as.vector(logcounts(sce_case[pathways_plot[j],])),
+        tomato=sce_case$tomato,
+        stage=as.double(sapply(sce_case$stage.refined,function(x) strsplit(x,"E")[[1]][2])))
+  colnames(df)[2] <- "tdTom"
+  df[df[,2] == FALSE,2] <- "negative"
+  df[df[,2] == TRUE,2] <- "positive"
+print(ggplot(df,aes(x=stage,y=gex,color=tdTom,fill=tdTom)) + geom_point()+geom_smooth()+theme_classic(base_size=18)+ggtitle(pathways_plot[j])+
+        scale_color_manual(values=c("positive"="red","negative"="darkblue"))+scale_fill_manual(values=c("positive"="red","negative"="darkblue")))
+}
+
+```
+
+Compute and plot average gene across 5 neighbours in pseudotime
+
+```{r}
+diff(range(correlation_pseudotime_Mixl1[["Epicardium"]]))
+```

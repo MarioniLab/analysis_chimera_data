@@ -1,0 +1,440 @@
+---
+title: "AML data analysis"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes  
+    keep_md: yes
+---
+
+This script applies perturbSuite_kinetics and perturbSuite_DE_dynamic to published scRNA-seq data from AML patients and healthy donors (van Galen et al. (2019). Single-Cell RNA-Seq Reveals AML Hierarchies Relevant to Disease Progression and Immunity. Cell.)                         
+
+# Data loading and computation of percentage of malignant cells 
+
+First, we read in the data sets and save them as a list of SingleCellExperiments, named by donor and time point. 
+
+```{r}
+source("../core_functions_dynamic.R")
+source("../core_functions_DA_testing_general.R")
+library(ggplot2)
+library(Polychrome)
+library(progeny)
+library(ggrepel)
+```
+
+```{r}
+set.seed(44)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    fig.path = "plots_AML/",
+    dev = c("pdf"),
+    dpi=300
+)
+options(datatable.fread.datatable=FALSE)
+library(SingleCellExperiment)
+library(data.table)
+library(destiny)
+library(scran)
+library(scater)
+library(batchelor)
+```
+
+```{r, eval=FALSE}
+file_names_anno <- list.files("vanGalen_data",pattern="anno")
+file_names_dem <- list.files("vanGalen_data",pattern="dem")
+sample_names <- sapply(file_names_anno,function(x) strsplit(x,"_")[[1]][2])
+sample_names <- sapply(sample_names,function(x) strsplit(x,"[.]")[[1]][1])
+
+sce_list <- list()
+for (j in 1:length(sample_names)){
+  print(j)
+  data_dem <- fread(paste0("vanGalen_data/",file_names_dem[grepl(paste0(sample_names[j],".dem"),file_names_dem)]),header=TRUE)
+  data_anno <- fread(paste0("vanGalen_data/",file_names_anno[grepl(paste0(sample_names[j],".anno"),file_names_anno)]),fill=TRUE)
+  rownames(data_anno) <- data_anno$Cell
+  rownames(data_dem) <- data_dem$Gene
+  data_dem <- data_dem[,colnames(data_dem)!="Gene"]
+  xx <- intersect(rownames(data_anno),colnames(data_dem))
+  sce_list[[j]] <- SingleCellExperiment(assay=list(counts=data_dem[,xx]),colData=as.matrix(data_anno)[xx,])
+}
+sample_ind_patient <- grepl("D",sample_names)
+days <- sapply(sample_names[sample_ind_patient],function(x) strsplit(x,"D")[[1]][2])
+add_zeros <- function(x){
+  if(nchar(x) ==2){
+    x <- paste0("0",x)
+  }
+  if (nchar(x) == 1){
+    x <- paste0("00",x)
+  }
+  return(x)
+}
+days <- sapply(days,add_zeros)
+names(sce_list) <- sample_names
+sample_names[sample_ind_patient] <- paste0(sapply(sample_names[sample_ind_patient],function(x) strsplit(x,"D")[[1]][1]),
+                                              "D",days)
+names(sce_list) <- sample_names
+saveRDS(sce_list,"sce_list_AML.rds")
+```
+
+Now we compute and plot the proportion of malignant cells for each of the patient data sets, for the myeloid trajectory. 
+
+```{r proportion_perturbed}
+sce_list <- readRDS("sce_list_AML.rds")
+sce_list <- sapply(sce_list,function(x) return(x[,x$PredictionRefined%in%c("malignant","normal")]))
+sce_list <- sapply(sce_list,function(x) {x$perturbed = x$PredictionRefined == "malignant";return(x)})
+sce_list <- sapply(sce_list,function(x) {names(colData(x))[names(colData(x))=="CellType"] = "celltype";return(x)})
+sce_list <- sapply(sce_list,function(x) {x$celltype = sapply(x$celltype,function(y) strsplit(y,"-")[[1]][1]);return(x)})
+
+saveRDS(sce_list,"sce_list_AML.rds")
+```
+
+
+```{r proportion_perturbed_myeloid, fig.height=2.5,fig.width=7}
+sce_list_my <- sapply(sce_list,function(x) x[,x$celltype %in% c("HSC","Prog","GMP","ProMono","Mono")])
+proportion_perturbed <- sapply(sce_list_my,function(x) sum(x$perturbed/ncol(x)))
+names(proportion_perturbed) <- names(sce_list)
+proportion_perturbed <- proportion_perturbed[grepl("-D",names(proportion_perturbed))]
+proportion_perturbed <- proportion_perturbed[proportion_perturbed>0]
+patient=sapply(names(proportion_perturbed),function(x) strsplit(x,"-")[[1]][1])
+patients_keep <- names(table(patient)[table(patient) >1])
+proportion_perturbed <- proportion_perturbed[patient%in%patients_keep]
+patient <- patient[patient%in%patients_keep]
+
+patients_keep <- patient[proportion_perturbed[paste0(patient,"-D000")] < 0.95]
+proportion_perturbed <- proportion_perturbed[patient%in%patients_keep]
+patient <- patient[patient%in%patients_keep]
+
+glasbey_cols=glasbey.colors(length(unique(patient))+2)
+glasbey_cols <- glasbey_cols[2:length(glasbey_cols)]
+glasbey_cols <- glasbey_cols[-3]
+names(glasbey_cols) <- unique(patient)
+x_lab_colours <- glasbey_cols[patient]
+ggplot(mapping=aes(x=names(proportion_perturbed),y=proportion_perturbed,fill=patient)) + geom_bar(stat="identity")+theme_classic()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ xlab("")+scale_fill_manual(values= glasbey_cols)+guides(fill = guide_legend(ncol=2,override.aes = list(size = 3)))+theme(axis.text.x = element_text(color=x_lab_colours))
+saveRDS(proportion_perturbed,file="proportion_perturbed_cells_AML.rds")
+```
+
+# Pseudotime for controls datasets and mapping of patient samples
+
+We compute pseudotimes for the cells along the myeoloid trajectory for the healthy bone marrow samples. 
+
+First, we merge the control data sets to one obtain one SingleCellExperiment data set. 
+
+```{r}
+sce_list <- readRDS("sce_list_AML.rds")
+sce_list_control <- sce_list[names(sce_list)[grepl("BM",names(sce_list))]]
+for (j in 1:length(sce_list_control)){
+  sce_list_control[[j]]$batch <- names(sce_list_control)[j]
+}
+sce_list_control <- multiBatchNorm(sce_list_control)
+sce_control <- do.call(cbind,sce_list_control)
+```
+
+We subset this SingleCellExperiment to cell types of the myeloid trajectory.
+
+```{r}
+sce_control_mt <- sce_control[,sce_control$celltype %in% c("HSC","Prog","GMP","ProMono","Mono")]
+
+```
+
+## Myeloid-trajectory genes
+
+We identify genes that are DE across cell types, but, conditional on the association with cell types, not across batches. 
+
+```{r}
+sce_control_mt$stage <- NA
+sce_control_mt$stage[sce_control_mt$celltype == "HSC"]  <- 1
+sce_control_mt$stage[sce_control_mt$celltype == "Prog"]  <- 2
+sce_control_mt$stage[sce_control_mt$celltype == "GMP"]  <- 3
+sce_control_mt$stage[sce_control_mt$celltype == "ProMono"]  <- 4
+sce_control_mt$stage[sce_control_mt$celltype == "Mono"]  <- 5
+sce_control_mt_dynamic_genes <- find_dynamic_genes(sce_control_mt)
+```
+
+## Pseudotimes for control samples
+
+We compute and plot diffusion trajectories coloured by pseudotime and by cell types. 
+
+```{r}
+sce_control_mt_dynamic_genes <- compute_and_plot_pseudotime(sce_control_mt_dynamic_genes)
+```
+
+Now we map the disease samples to the reference pseudotime using correlation-based mapping on the myeloid-trajectory genes identified above.
+
+```{r}
+sce_list_AML <- sce_list[names(proportion_perturbed)[proportion_perturbed < 0.95 & proportion_perturbed > 0.05]]
+for (j in 1:length(sce_list_AML)){
+  sce_list_AML[[j]]$batch <- names(sce_list_AML)[j]
+  colData(sce_list_AML[[j]]) <- colData(sce_list_AML[[j]])[setdiff(names(colData(sce_list_AML[[j]])),"NanoporeTranscripts")]
+}
+sce_list_AML <- multiBatchNorm(sce_list_AML)
+sce_AML <- do.call(cbind,sce_list_AML)
+celltypes_keep <- c(unique(sce_control_mt_dynamic_genes$CellType),paste0(unique(sce_control_mt_dynamic_genes$CellType),"-like"))
+sce_AML <- sce_AML[,sce_AML$CellType%in%celltypes_keep]
+sce_AML_dynamic_genes <- sce_AML[rownames(sce_control_mt_dynamic_genes),]
+sce_list_dynamic_genes <- sapply(sce_list,function(x) return(x[rownames(sce_control_mt_dynamic_genes),]))
+sce_list_dynamic_genes <- lapply(sce_list_dynamic_genes,logNormCounts)
+sce_list_dynamic_genes_AML <- sce_list_dynamic_genes[grepl("AML",names(sce_list_dynamic_genes))]
+sce_list_dynamic_genes_AML <- sce_list_dynamic_genes_AML[intersect(names(sce_list_dynamic_genes_AML),
+                              names(proportion_perturbed)[proportion_perturbed > 0.1])]
+```
+
+# perturbSuite_kinetics
+
+Now we perform perturbSuite_kinetics to test whether there is delay or faster progression along the myeoloid trajectory for the malignant compared to the normal cells. 
+
+```{r, eval=FALSE}
+wilcox_AML <- list()
+correlation_matrices <- list()
+for (j in 1:length(sce_list_dynamic_genes_AML)){
+  temp <- correlation_pseudotime(reference_sce=sce_control_mt_dynamic_genes,perturbed_sce=sce_list_dynamic_genes_AML[[j]])
+  sce_AML1 <- temp$perturbed_sce
+  correlation_matrices[[j]] <- temp$correlation_matrix
+  sce_AML1$perturbation_status <- sce_AML1$PredictionRefined
+  sce_AML1 <- sce_AML1[,sce_AML1$perturbation_status%in%c("normal","malignant")]
+  sce_AML1$perturbation_status[sce_AML1$PredictionRefined=="malignant"] <- "perturbed"
+  if (length(unique(sce_AML1$perturbation_status)) > 1){
+    wilcox_AML[[j]] <- Wilcoxon_test_perturbed_vs_normal(sce_AML1)
+    sce_list_dynamic_genes_AML[[j]] <- sce_AML1
+  }
+}
+names(wilcox_AML) <- names(sce_list_dynamic_genes_AML)[1:length(wilcox_AML)]
+wilcox_AML <- wilcox_AML[unlist(lapply(wilcox_AML,function(x) length(x) > 0))]
+for (j in 1:length(wilcox_AML)){
+  wilcox_AML[[j]]$sample <- names(wilcox_AML)[j]
+}
+wilcox_AML <- do.call(rbind,wilcox_AML)
+wilcox_AML <- wilcox_AML[order(wilcox_AML$sample),]
+wilcox_AML$FDR <- p.adjust(wilcox_AML$p_value)
+wilcox_AML$sig <- wilcox_AML$FDR < 0.1
+saveRDS(wilcox_AML,file="wilcox_AML.rds")
+saveRDS(sce_list_dynamic_genes_AML,file="sce_list_dynamic_genes_AML.rds")
+```
+
+We plot the confidence interval for the location parameter from the Wilcoxon test for the D0 samples. 
+
+```{r wilcox_D0,fig.height=2,fig.width=5}
+wilcox_AML <- readRDS("wilcox_AML.rds")
+wilcox_AML_D0 <- wilcox_AML[grepl("D0",wilcox_AML$sample),]
+patient_wilcox_D0 <- sapply(wilcox_AML_D0$sample,function(x) return(strsplit(x,"-")[[1]][1]))
+colours_AML_D0 <- glasbey_cols[patient_wilcox_D0]
+colours_AML_D0[!(wilcox_AML_D0$sig)] <- "grey"
+pp <- ggplot(wilcox_AML_D0, aes(x = lower_bound, y = sample)) +
+  geom_segment(aes(xend = upper_bound, yend = sample),size=1,color=colours_AML_D0) + 
+geom_point(size=2,color=colours_AML_D0) + 
+geom_point(aes(x = upper_bound),size=2,color=colours_AML_D0)  +
+  xlab("conf. intervall\nWilcoxon statistic") + theme_bw(base_size=18) + geom_vline(xintercept = 0)+
+theme(axis.text.y = element_text(color=glasbey_cols[patient_wilcox_D0]))
+print(pp)
+```
+
+We now plot the confidence intervals from the Wilcoxon tests for patients 328, 329, and 707B. 
+
+```{r wilcox_per_patient,fig.height=2,fig.width=5}
+wilcox_AML_sub <- wilcox_AML[wilcox_AML$sample%in%c("AML328-D000","AML328-D029","AML329-D000","AML329-D200","AML707B-D000","AML707B-D108"),]
+patients <- c("AML328","AML329","AML707B")
+for (j in 1:length(patients)){
+    wilcox_AML_patient <- wilcox_AML_sub[grepl(patients[j],rownames(wilcox_AML_sub)),]
+    colours_AML <- rep(glasbey_cols[patients[j]],nrow(wilcox_AML_patient))
+    colours_AML[!(wilcox_AML_patient$sig)] <- "grey"
+    pp <- ggplot(wilcox_AML_patient, aes(x = lower_bound, y = sample)) +
+    geom_segment(aes(xend = upper_bound, yend = sample),size=1,color=colours_AML) + 
+  geom_point(size=2,color=colours_AML)+
+  geom_point(aes(x = upper_bound),size=2,color=colours_AML)  +
+    xlab("conf. intervall\nWilcoxon statistic") + theme_bw(base_size=18) + geom_vline(xintercept = 0)
+  print(pp)
+}
+```
+
+We also plot the densities of the pseudotime distributions at D0. 
+
+```{r densities_D0}
+sce_list_dynamic_genes_AML <- readRDS("sce_list_dynamic_genes_AML.rds")
+sce_list_dynamic_genes_AML_sig <- sce_list_dynamic_genes_AML[names(sce_list_dynamic_genes_AML)%in%wilcox_AML$sample]
+dpt <- do.call(c,lapply(sce_list_dynamic_genes_AML_sig,function(x) x$dpt))
+perturbation_status <- do.call(c,lapply(sce_list_dynamic_genes_AML_sig,function(x) x$perturbation_status))
+sample <- do.call(c,lapply(1:length(sce_list_dynamic_genes_AML_sig),function(x) rep(names(sce_list_dynamic_genes_AML_sig)[x],
+                                ncol(sce_list_dynamic_genes_AML_sig[[x]]))))
+levels_sample <- rownames(wilcox_AML)[order(wilcox_AML$estimate)]
+df <- data.frame(dpt=dpt,sample=factor(sample,levels=levels_sample),perturbation_status=perturbation_status)
+
+df_D0 <- df[grepl("D0",df$sample),]
+ggplot(df_D0, aes(x = dpt, y = sample,fill=perturbation_status)) + ggridges::geom_density_ridges(alpha=0.5)+
+  scale_fill_manual(values=c("normal"="darkblue","perturbed"="darkred")) + theme_classic() + theme(axis.text.y = element_text(color=glasbey_cols[sapply(levels_sample[levels_sample%in%df_D0$sample],function(x) strsplit(x,"-")[[1]][1])]))
+```
+```{r densities_patients}
+patient_list <- list(c("AML328-D0","AML328-D29"),c("AML329-D000","AML329-D020"),c("AML707B-D000","AML707B-D018"))
+for (j in 1:length(patient_list)){
+  df_patient <- df[df$sample%in%patient_list[[j]],]
+  print(ggplot(df_patient, aes(x = dpt, y = sample,fill=perturbation_status)) + ggridges::geom_density_ridges(alpha=0.5)+
+  scale_fill_manual(values=c("normal"="darkblue","perturbed"="darkred")) + theme_classic() )
+}
+```
+
+
+# perturbSuite_DE_dynamic
+
+We apply perturbSuite_DE_dynamic to test for changes of gene expression along the myeloid trajectory between diagnosis and the first time point after diagnosis, based on the myeloid-trajectory genes identified above. 
+
+## AML328
+
+```{r }
+sce_case <- sce_list_dynamic_genes_AML[["AML328-D029"]]
+sce_control <- sce_list_dynamic_genes_AML[["AML328-D000"]]
+pseudotime_case <- sce_case$dpt
+pseudotime_control <- sce_control$dpt
+```
+
+First, we compute and plot dynamically differentially expressed genes for patient AML328.
+
+```{r dynamic_328}
+DE_expression_dynamic_AML328 <- DE_expression_dynamic(sce_case,sce_control,pseudotime_case,pseudotime_control)
+print(volcano_plot_dynamic(DE_expression_dynamic_AML328,FDR_dynamic=0.1,max_highlight=25) + ggtitle("AML328 D29 vs D0-dynamic"))
+
+df_dynamic <- DE_expression_dynamic_AML328[,c("dynamic_effect.gene","dynamic_effect_contrasted_with_control.z_value","dynamic_effect_contrasted_with_control.FDR","dynamic_effect.z_value", "dynamic_effect.FDR")]
+colnames(df_dynamic) <- c("gene","z_score_contrasted_with_control","FDR_contrast","z_score_case_only","FDR_case_only")
+df_dynamic$gene <- sapply(df_dynamic$gene,function(x) strsplit(x,"dynamic-")[[1]][1])
+
+write.table(df_dynamic[df_dynamic$FDR_contrast <0.1&df_dynamic$FDR_case_only<0.1,], file="DE_expression_dynamic_AML328.csv",sep=",",row.names=TRUE,col.names=TRUE)
+
+write.table(df_dynamic,file="DE_expression_dynamic_AML328_all.csv",sep=",",row.names=TRUE,col.names=TRUE)
+```
+
+We test whether the number of dynamically up- and down-regulated (compared to diagnosis) ribosomal genes is significant (Fisher's exact test). 
+
+```{r}
+genes_up <- df_dynamic$gene[df_dynamic$FDR_contrast<0.1&df_dynamic$FDR_case_only<0.5&df_dynamic$z_score_contrasted_with_control>0]
+genes_up <- sapply(genes_up,function(x) return(strsplit(x,"- dynamic")[[1]][1]))
+genes_up <- genes_up[!(is.na(genes_up))]
+names(genes_up) <- NULL
+genes_down <- df_dynamic$gene[df_dynamic$FDR_contrast<0.1&df_dynamic$FDR_case_only<0.5&df_dynamic$z_score_contrasted_with_control<0]
+genes_down <- sapply(genes_down,function(x) return(strsplit(x,"- dynamic")[[1]][1]))
+genes_down <- genes_down[!(is.na(genes_down))]
+names(genes_down) <- NULL
+rib_genes <- read.table("KEGG_RIBOSOME.v2023.1.Hs.gmt")
+rib_genes <- rib_genes[,-(1:2)]
+rib_genes <- as.vector(rib_genes)
+sum(rownames(sce_case) %in% rib_genes)/nrow(sce_case)
+sum(genes_up %in% rib_genes)/length(genes_up)
+sum(genes_down%in% rib_genes)
+sum(genes_down%in% rib_genes)/length(genes_down)
+```
+
+The total number of myeloid trajectory genes is equal to `r length(rownames(sce_case))`.
+Out of these `r sum(rownames(sce_case) %in% rib_genes)` are ribosomal genes (KEGG pathway).
+There are `length(genes_down)` down-regulated genes (at the first time point after D0 compared to D0), out of which `r sum(genes_down %in% rib_genes)` are ribosomal genes. 
+There are `length(setdiff(rownames(sce_case),genes_down))` genes that are not down-regulated, out of which `r sum(setdiff(rownames(sce_case),genes_down) %in% rib_genes)` are ribosomal genes. 
+
+We perform a Fisher's exact test to test the significance of this difference in the proportion of ribosomal genes.
+
+```{r}
+genes_not_down <- setdiff(rownames(sce_case),genes_down)
+table_Fisher <- rbind(c(sum(genes_down %in% rib_genes),sum(!(genes_down %in% rib_genes))),
+                      c(sum(genes_not_down %in% rib_genes),sum(!(genes_not_down %in% rib_genes))))
+fisher.test(table_Fisher)
+```
+
+## AML329
+
+
+```{r static_239}
+sce_case <- sce_list_dynamic_genes_AML[["AML329-D020"]]
+sce_control <- sce_list_dynamic_genes_AML[["AML329-D000"]]
+pseudotime_case <- sce_case$dpt
+pseudotime_control <- sce_control$dpt
+```
+
+We compute and plot dynamically differentially expressed genes for patient AML329.
+
+```{r dynamic_AML329}
+DE_expression_dynamic_AML329 <- DE_expression_dynamic(sce_case,sce_control,pseudotime_case,pseudotime_control)
+print(volcano_plot_dynamic(DE_expression_dynamic_AML329,FDR_dynamic=0.1,max_highlight=25) + ggtitle("AML329 D20 vs D0-dynamic"))
+
+df_dynamic <- DE_expression_dynamic_AML329[,c("dynamic_effect.gene","dynamic_effect_contrasted_with_control.z_value","dynamic_effect_contrasted_with_control.FDR","dynamic_effect.z_value", "dynamic_effect.FDR")]
+colnames(df_dynamic) <- c("gene","z_score_contrasted_with_control","FDR_contrast","z_score_case_only","FDR_case_only")
+df_dynamic$gene <- sapply(df_dynamic$gene,function(x) strsplit(x,"- dynamic")[[1]][1])
+
+write.table(df_dynamic[df_dynamic$FDR_contrast <0.1&df_dynamic$FDR_case_only<0.1,], file="DE_expression_dynamic_AML329.csv",sep=",",row.names=TRUE,col.names=TRUE)
+
+write.table(df_dynamic,file="DE_expression_dynamic_AML329_all.csv",sep=",",row.names=TRUE,col.names=TRUE)
+```
+
+Testing for the significance of the number of ribosomal genes. 
+
+```{r}
+genes_up <- df_dynamic$gene[df_dynamic$FDR_contrast<0.1&df_dynamic$FDR_case_only<0.5&df_dynamic$z_score_contrasted_with_control>0]
+genes_up <- sapply(genes_up,function(x) return(strsplit(x,"- dynamic")[[1]][1]))
+genes_up <- genes_up[!(is.na(genes_up))]
+names(genes_up) <- NULL
+genes_down <- df_dynamic$gene[df_dynamic$FDR_contrast<0.1&df_dynamic$FDR_case_only<0.5&df_dynamic$z_score_contrasted_with_control<0]
+genes_down <- sapply(genes_down,function(x) return(strsplit(x,"- dynamic")[[1]][1]))
+genes_down <- genes_down[!(is.na(genes_down))]
+names(genes_down) <- NULL
+
+```
+
+
+There are `length(genes_down)` down-regulated genes (at the first time point after D0 compared to D0), out of which `r sum(genes_down %in% rib_genes)` are ribosomal genes. 
+There are `length(setdiff(rownames(sce_case),genes_down))` genes that are not down-regulated, out of which `r sum(setdiff(rownames(sce_case),genes_down) %in% rib_genes)` are ribosomal genes. 
+
+We perform a Fisher's exact test to test the significance of this difference in the proportion of ribosomal genes.
+
+```{r}
+genes_not_down <- setdiff(rownames(sce_case),genes_down)
+table_Fisher <- rbind(c(sum(genes_down %in% rib_genes),sum(!(genes_down %in% rib_genes))),
+                      c(sum(genes_not_down %in% rib_genes),sum(!(genes_not_down %in% rib_genes))))
+fisher.test(table_Fisher)
+```
+
+
+## AML707B
+
+```{r static_707B}
+sce_case <- sce_list_dynamic_genes_AML[["AML707B-D018"]]
+sce_control <- sce_list_dynamic_genes_AML[["AML707B-D000"]]
+pseudotime_case <- sce_case$dpt
+pseudotime_control <- sce_control$dpt
+```
+
+We compute and plot dynamically differentially expressed genes for patient AML707B
+
+```{r dynamic_707B}
+DE_expression_dynamic_AML707B <- DE_expression_dynamic(sce_case,sce_control,pseudotime_case,pseudotime_control)
+print(volcano_plot_dynamic(DE_expression_dynamic_AML707B,FDR_dynamic=0.1,max_highlight=25) + ggtitle("AML707B D18 vs D0-dynamic"))
+
+df_dynamic <- DE_expression_dynamic_AML707B[,c("dynamic_effect.gene","dynamic_effect_contrasted_with_control.z_value","dynamic_effect_contrasted_with_control.FDR","dynamic_effect.z_value", "dynamic_effect.FDR")]
+colnames(df_dynamic) <- c("gene","z_score_contrasted_with_control","FDR_contrast","z_score_case_only","FDR_case_only")
+df_dynamic$gene <- sapply(df_dynamic$gene,function(x) strsplit(x,"- dynamic")[[1]][1])
+
+write.table(df_dynamic[df_dynamic$FDR_contrast <0.1&df_dynamic$FDR_case_only<0.1,], file="DE_expression_dynamic_AML707B.csv",sep=",",row.names=TRUE,col.names=TRUE)
+
+write.table(df_dynamic,file="DE_expression_dynamic_AML707B_all.csv",sep=",",row.names=TRUE,col.names=TRUE)
+```
+
+
+Testing for the significance of the number of ribosomal genes. 
+
+```{r}
+genes_up <- df_dynamic$gene[df_dynamic$FDR_contrast<0.1&df_dynamic$FDR_case_only<0.5&df_dynamic$z_score_contrasted_with_control>0]
+genes_up <- sapply(genes_up,function(x) return(strsplit(x,"- dynamic")[[1]][1]))
+genes_up <- genes_up[!(is.na(genes_up))]
+names(genes_up) <- NULL
+genes_down <- df_dynamic$gene[df_dynamic$FDR_contrast<0.1&df_dynamic$FDR_case_only<0.5&df_dynamic$z_score_contrasted_with_control<0]
+genes_down <- sapply(genes_down,function(x) return(strsplit(x,"- dynamic")[[1]][1]))
+genes_down <- genes_down[!(is.na(genes_down))]
+names(genes_down) <- NULL
+
+```
+
+There are `length(genes_up)` up-regulated genes (at the first time point after D0 compared to D0), out of which `r sum(genes_up %in% rib_genes)` are ribosomal genes. 
+There are `length(setdiff(rownames(sce_case),genes_up))` genes that are not up-regulated, out of which `r sum(setdiff(rownames(sce_case),genes_up) %in% rib_genes)` are ribosomal genes. 
+
+We perform a Fisher's exact test to test the significance of this difference in the proportion of ribosomal genes.
+
+```{r}
+genes_not_up <- setdiff(rownames(sce_case),genes_up)
+table_Fisher <- rbind(c(sum(genes_up %in% rib_genes),sum(!(genes_up %in% rib_genes))),
+                      c(sum(genes_not_up %in% rib_genes),sum(!(genes_not_up %in% rib_genes))))
+fisher.test(table_Fisher)
+```

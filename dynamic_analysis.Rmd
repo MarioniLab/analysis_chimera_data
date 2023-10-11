@@ -1,0 +1,377 @@
+---
+title: "Lineage analysis with correlation pseudotime"
+author: "Magdalena Strauss"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes  
+    keep_md: yes 
+---
+  
+This notebook computes dynamic shifts caused by T and Mixl1 knockouts for chimeric mouse embryoes. 
+
+```{r}
+library(scran)
+library(scater)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    dev = c("pdf"),
+    dpi=300
+)
+```
+
+```{r}
+chimeraT <- readRDS("../results/chimeraT_2020_extended_mapping_rev.rds")
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+correlation_pseudotime_T <- readRDS("results_no_split/correlation_pseudotime_T.rds")
+correlation_pseudotime_WT <- readRDS("results_no_split/correlation_pseudotime_WT.rds")
+correlation_pseudotime_Mixl1 <- readRDS("results_no_split/correlation_pseudotime_Mixl1.rds")
+Celltypes <- read.table("lineage_names.txt")$V1
+names(correlation_pseudotime_T) <- Celltypes
+names(correlation_pseudotime_WT) <- Celltypes
+names(correlation_pseudotime_Mixl1) <- Celltypes
+correlation_pseudotime_T <- correlation_pseudotime_T[unlist(lapply(correlation_pseudotime_T, function(x) !(is.null(x))))]
+correlation_pseudotime_WT <- correlation_pseudotime_WT[unlist(lapply(correlation_pseudotime_WT, function(x) !(is.null(x))))]
+correlation_pseudotime_Mixl1 <- correlation_pseudotime_Mixl1[unlist(lapply(correlation_pseudotime_Mixl1, function(x) !(is.null(x))))]
+```
+
+We perform the tests for lineages for which there is not much depletion of tomato positive cells (the lineage has an odds ratio of at least 0.5). We mark all the lineages with higher depletion levels. 
+
+```{r}
+DT_T <- readRDS("diff_trajectories_T_rev.rds")
+DT_Mixl1 <- readRDS("diff_trajectories_Mixl1_rev.rds")
+correlation_pseudotime_Mixl1 <- correlation_pseudotime_Mixl1[intersect(names(correlation_pseudotime_Mixl1),DT_Mixl1$trajectory[DT_Mixl1$odds_ratio>0.5])]
+depleted_Mixl1 <- DT_Mixl1$trajectory[DT_Mixl1$odds_ratio<= 0.25]
+correlation_pseudotime_T <-correlation_pseudotime_T[intersect(names(correlation_pseudotime_T),DT_T$trajectory[DT_T$odds_ratio>0.5])]
+depleted_T <- DT_T$trajectory[DT_T$odds_ratio<= 0.25]
+```
+
+```{r density_Mixl1}
+for (j in 1:length(correlation_pseudotime_Mixl1))
+  {
+  p_Mixl1 <- ggplot(mapping=aes(x= correlation_pseudotime_Mixl1[[j]], 
+        fill=chimeraMixl1$tomato[match(names(correlation_pseudotime_Mixl1[[j]]),colnames(chimeraMixl1))])) + 
+    geom_density(position = "identity",alpha=0.4) + scale_fill_manual(values=c("darkblue","darkred")) +
+    xlab("pseudotime") + ggtitle(paste0("Mixl1 chimera, lineage: ",names(correlation_pseudotime_Mixl1)[j]))+ guides(fill=guide_legend(title="tomato")) + 
+                                   theme_classic(base_size=12)+theme(legend.position = "bottom")
+  #print(p_Mixl1)
+}
+```
+
+```{r density_T}
+for (j in 1:length(correlation_pseudotime_T))
+  {
+  p_T <- ggplot(mapping=aes(x= correlation_pseudotime_T[[j]], 
+        fill=chimeraT$tomato[match(names(correlation_pseudotime_T[[j]]),colnames(chimeraT))])) + 
+    geom_density(position = "identity",alpha=0.4) + scale_fill_manual(values=c("darkblue","darkred")) +
+    xlab("pseudotime") + ggtitle(paste0("T chimera, lineage: ",names(correlation_pseudotime_T)[j]))+ guides(fill=guide_legend(title="tomato")) + 
+                                   theme_classic(base_size=12)+theme(legend.position = "bottom")
+  #print(p_T)
+}
+```
+```{r density_WT}
+for (j in 1:length(correlation_pseudotime_WT))
+  {
+  p_WT <- ggplot(mapping=aes(x= correlation_pseudotime_WT[[j]], 
+        fill=chimeraWT$tomato[match(names(correlation_pseudotime_WT[[j]]),colnames(chimeraWT))])) + 
+    geom_density(position = "identity",alpha=0.4) + scale_fill_manual(values=c("darkblue","darkred")) +
+    xlab("pseudotime") + ggtitle(paste0("WT chimera, lineage: ",names(correlation_pseudotime_WT)[j]))+ guides(fill=guide_legend(title="tomato")) + 
+                                   theme_classic(base_size=12)+theme(legend.position = "bottom")
+  #print(p_WT)
+}
+```
+
+We compute the Wilcoxon statistics
+
+```{r }
+df <- data.frame(lower_bound = rep(NA,length(correlation_pseudotime_Mixl1)),upper_bound= rep(NA,length(correlation_pseudotime_Mixl1)),
+                 p_value= rep(NA,length(correlation_pseudotime_Mixl1)),estimate= rep(NA,length(correlation_pseudotime_Mixl1)))
+for (j in 1:length(correlation_pseudotime_Mixl1)){
+  tomato <- chimeraMixl1$tomato[match(names(correlation_pseudotime_Mixl1[[j]]),colnames(chimeraMixl1))]
+  wilcox_Mixl1 <- wilcox.test(correlation_pseudotime_Mixl1[[j]][tomato],correlation_pseudotime_Mixl1[[j]][!(tomato)],conf.int = TRUE)
+  df$lower_bound[j] <- wilcox_Mixl1$conf.int[1]
+  df$upper_bound[j] <- wilcox_Mixl1$conf.int[2]
+  df$p_value[j] <- wilcox_Mixl1$p.value
+  df$estimate[j] <- wilcox_Mixl1$estimate
+}
+df$p_value <- p.adjust(df$p_value)
+rownames(df) <- names(correlation_pseudotime_Mixl1)
+saveRDS(df,file="results_no_split/Wilcoxon_Mixl1.rds")
+```
+
+```{r}
+df <- data.frame(lower_bound = rep(NA,length(correlation_pseudotime_T)),upper_bound= rep(NA,length(correlation_pseudotime_T)),
+                 p_value= rep(NA,length(correlation_pseudotime_T)),estimate= rep(NA,length(correlation_pseudotime_T)))
+for (j in 1:length(correlation_pseudotime_T)){
+  tomato <- chimeraT$tomato[match(names(correlation_pseudotime_T[[j]]),colnames(chimeraT))]
+  wilcox_T <- wilcox.test(correlation_pseudotime_T[[j]][tomato],correlation_pseudotime_T[[j]][!(tomato)],conf.int = TRUE)
+  df$lower_bound[j] <- wilcox_T$conf.int[1]
+  df$upper_bound[j] <- wilcox_T$conf.int[2]
+  df$p_value[j] <- wilcox_T$p.value
+  df$estimate[j] <- wilcox_T$estimate
+}
+df$p_value <- p.adjust(df$p_value)
+rownames(df) <- names(correlation_pseudotime_T)
+saveRDS(df,file="results_no_split/Wilcoxon_T.rds")
+```
+
+
+```{r}
+df <- data.frame(lower_bound = rep(NA,length(correlation_pseudotime_WT)),upper_bound= rep(NA,length(correlation_pseudotime_WT)),
+                 p_value= rep(NA,length(correlation_pseudotime_WT)),estimate= rep(NA,length(correlation_pseudotime_WT)))
+for (j in 1:length(correlation_pseudotime_WT)){
+  tomato <- chimeraWT$tomato[match(names(correlation_pseudotime_WT[[j]]),colnames(chimeraWT))]
+  wilcox_WT <- wilcox.test(correlation_pseudotime_WT[[j]][tomato],correlation_pseudotime_WT[[j]][!(tomato)],conf.int = TRUE)
+  df$lower_bound[j] <- wilcox_WT$conf.int[1]
+  df$upper_bound[j] <- wilcox_WT$conf.int[2]
+  df$p_value[j] <- wilcox_WT$p.value
+  df$estimate[j] <- wilcox_WT$estimate
+}
+df$p_value <- p.adjust(df$p_value)
+rownames(df) <- names(correlation_pseudotime_WT)
+saveRDS(df,file="results_no_split/Wilcoxon_WT.rds")
+```
+
+Plotting shift in median between the pseudo-time density of tomato positive versus tomato negative cells. 
+
+```{r Wilcoxon_stats_Mixl1}
+Wilcoxon_stats_T <- readRDS("results_no_split/Wilcoxon_T.rds")
+Wilcoxon_stats_T$sig <- Wilcoxon_stats_T$p_value < 0.1
+DT_T <- readRDS("diff_trajectories_T_rev.rds")
+
+Wilcoxon_stats_WT <- readRDS("results_no_split/Wilcoxon_WT.rds")
+Wilcoxon_stats_WT$sig <- Wilcoxon_stats_WT$p_value < 0.1
+
+Wilcoxon_stats_Mixl1 <- readRDS("results_no_split/Wilcoxon_Mixl1.rds")
+Wilcoxon_stats_Mixl1$sig <- Wilcoxon_stats_Mixl1$p_value < 0.1
+Wilcoxon_stats_Mixl1$location_WT <- Wilcoxon_stats_WT[rownames(Wilcoxon_stats_Mixl1),]$estimate
+Wilcoxon_stats_Mixl1$lineage <- rownames(Wilcoxon_stats_Mixl1)
+
+
+
+Wilcoxon_stats_Mixl1$lower_bound_WT <- Wilcoxon_stats_WT[rownames(Wilcoxon_stats_Mixl1),]$lower_bound
+Wilcoxon_stats_Mixl1$upper_bound_WT <- Wilcoxon_stats_WT[rownames(Wilcoxon_stats_Mixl1),]$upper_bound
+
+ggplot(Wilcoxon_stats_Mixl1,aes(x=location_WT,y=estimate,label=lineage,color=sig)) + geom_point()+geom_hline(yintercept=0) + xlab("location WT")+
+  ylab("location Mixl1")+geom_vline(xintercept=0)+ggtitle("") + scale_y_continuous(limits=c(min(Wilcoxon_stats_Mixl1$estimate*1.2),max(Wilcoxon_stats_Mixl1$estimate*1.2)))+
+  scale_x_continuous(limits=c(min(Wilcoxon_stats_Mixl1$estimate*1.2),max(Wilcoxon_stats_Mixl1$estimate*1.2))) + theme_bw()+ ggrepel::geom_text_repel(data=Wilcoxon_stats_Mixl1[Wilcoxon_stats_Mixl1$sig,], 
+                             aes(x=location_WT, y=estimate, label=lineage), max.overlaps=Inf, size=4) + scale_color_manual(values=c("FALSE"="grey","TRUE"="darkred")) + labs(colour="significant")
+```
+Plotting significant shifts in the trajectory dynamics 
+
+```{r Wilcoxon_stats_Mixl1_2,fig.height=1.4,fig.width=7}
+sig <- rep(FALSE,nrow(Wilcoxon_stats_Mixl1))
+xx <-  Wilcoxon_stats_Mixl1$lower_bound_WT > Wilcoxon_stats_Mixl1$upper_bound
+yy <- Wilcoxon_stats_Mixl1$upper_bound_WT < Wilcoxon_stats_Mixl1$lower_bound
+sig[xx] <- TRUE
+sig[yy] <- TRUE
+Wilcoxon_stats_Mixl1_sub <- Wilcoxon_stats_Mixl1[Wilcoxon_stats_Mixl1$sig & sig,]
+ pp <- ggplot(Wilcoxon_stats_Mixl1_sub, aes(x = lower_bound_WT, y = lineage)) +
+    geom_segment(aes(xend = upper_bound_WT, yend = lineage), colour = "black",size=1) +
+    geom_point() +
+    geom_point(aes(x = upper_bound_WT,show.legend=TRUE)) +
+    geom_point(aes(x=lower_bound),color="purple") + 
+    geom_point(aes(x=upper_bound),color="purple",show.legend=TRUE) + 
+    geom_segment(aes(xend=upper_bound,yend = lineage,x=lower_bound,y=lineage),color="purple",size=1) +
+    xlab("conf. interval - Wilcoxon statistic") + theme_bw(base_size=18) + geom_vline(xintercept = 0)+
+     annotate("text", x = 0.0005, y = 2.2, label = "Mixl1",color="purple")+ylab("")+
+    annotate("text", x = 0.0005, y = 1.7, label = "WT",color="black") +theme_minimal()
+  
+print(pp)
+```
+
+```{r Wilcoxon_stats_T}
+Wilcoxon_stats_T$location_WT <- Wilcoxon_stats_WT[rownames(Wilcoxon_stats_T),]$estimate
+Wilcoxon_stats_T$lineage <- rownames(Wilcoxon_stats_T)
+
+Wilcoxon_stats_T$sig <- Wilcoxon_stats_T$p_value < 0.1
+Wilcoxon_stats_T$lower_bound_WT <- Wilcoxon_stats_WT[rownames(Wilcoxon_stats_T),]$lower_bound
+Wilcoxon_stats_T$upper_bound_WT <- Wilcoxon_stats_WT[rownames(Wilcoxon_stats_T),]$upper_bound
+
+ggplot(Wilcoxon_stats_T,aes(x=location_WT,y=estimate,label=lineage,color=sig)) + geom_point()+geom_hline(yintercept=0) + xlab("location T")+
+  ylab("location T")+geom_vline(xintercept=0)+ggtitle("") + scale_y_continuous(limits=c(min(Wilcoxon_stats_T$estimate*1.2),max(Wilcoxon_stats_T$estimate*1.2)))+
+  scale_x_continuous(limits=c(min(Wilcoxon_stats_T$estimate*1.2),max(Wilcoxon_stats_T$estimate*1.2))) + theme_bw()+ ggrepel::geom_text_repel(data=Wilcoxon_stats_T[Wilcoxon_stats_T$sig,], 
+                             aes(x=location_WT, y=estimate, label=lineage), max.overlaps=Inf, size=4) + scale_color_manual(values=c("FALSE"="grey","TRUE"="darkred")) + labs(colour="significant")
+```
+
+```{r Wilcoxon_stats_T_2,fig.height=2,fig.width=7}
+sig <- rep(FALSE,nrow(Wilcoxon_stats_T))
+xx <-  Wilcoxon_stats_T$lower_bound_WT > Wilcoxon_stats_T$upper_bound
+yy <- Wilcoxon_stats_T$upper_bound_WT < Wilcoxon_stats_T$lower_bound
+sig[xx] <- TRUE
+sig[yy] <- TRUE
+Wilcoxon_stats_T_sub <- Wilcoxon_stats_T[Wilcoxon_stats_T$sig & sig,]
+ pp <- ggplot(Wilcoxon_stats_T_sub, aes(x = lower_bound_WT, y = lineage)) +
+    geom_segment(aes(xend = upper_bound_WT, yend = lineage), colour = "black",size=1) +
+    geom_point() +
+    geom_point(aes(x = upper_bound_WT,show.legend=TRUE)) +
+    geom_point(aes(x=lower_bound),color="purple") + 
+    geom_point(aes(x=upper_bound),color="purple",show.legend=TRUE) + 
+    geom_segment(aes(xend=upper_bound,yend = lineage,x=lower_bound,y=lineage),color="purple",size=1) +
+    xlab("conf. interval - Wilcoxon statistic") + theme_bw(base_size=18) + geom_vline(xintercept = 0)+
+    annotate("text", x = 0.005, y = 2.7, label = "T",color="purple")+ylab("")+
+    annotate("text", x = 0.005, y = 2.2, label = "WT",color="black") +theme_minimal()
+  
+print(pp)
+```
+
+Summary plots combining enrichment/depletion from the celltype, lineage and trajectory perspective.
+
+```{r ,fig.width=11,fig.height=6}
+colours_comp <- c("up in T only"= "#F392E5", "up in Mixl1 only"="#FEED07","up in both"="#FE0707",
+"down in T only"="#32CBF6","down in Mixl1 only"="#303B30","down in both"="#1B1FFC",
+"up in T, down in Mixl1"="#A24BCE","down in T, up in Mixl1"="#27AC23",
+"not significant"="grey")
+
+da_celltypes_T <- readRDS("da_celltypes_T_rev.rds")
+da_celltypes_Mixl1 <- readRDS("da_celltypes_Mixl1_rev.rds")
+celltypes <- unique(c(da_celltypes_T$celltype,da_celltypes_Mixl1$celltype))
+lineages <- unique(c(DT_T$trajectory,DT_Mixl1$trajectory))                    
+celltypes <- gsub("[ ]","_",celltypes)
+celltypes_not_in_lineage_comparison <- setdiff(celltypes,lineages)
+celltypes_not_in_dynamic_comparison_T <- setdiff(celltypes,rownames(Wilcoxon_stats_T))
+celltypes_not_in_dynamic_comparison_Mixl1 <- setdiff(celltypes,rownames(Wilcoxon_stats_Mixl1))
+lineages_not_in_celltype_comparison <- setdiff(lineages, celltypes)
+
+celltypes <- unique(c(celltypes,lineages))
+df_comp <- data.frame(celltype=celltypes)
+df_comp$celltype_T <- NA
+indDA <- match(gsub("[ ]","_",da_celltypes_T$celltype),celltypes)
+df_comp$celltype_T[indDA[!(is.na(indDA))]] <- da_celltypes_T$sig
+df_comp$celltype_T[df_comp$celltype%in%lineages_not_in_celltype_comparison] <- "not_included"
+
+df_comp$celltype_Mixl1 <- NA
+indDA <- match(gsub("[ ]","_",da_celltypes_Mixl1$celltype),celltypes)
+df_comp$celltype_Mixl1[indDA[!(is.na(indDA))]] <- da_celltypes_Mixl1$sig
+df_comp$celltype_Mixl1[df_comp$celltype%in%lineages_not_in_celltype_comparison] <- "not_included"
+
+df_comp$lineage_T <- NA
+df_comp$lineage_Mixl1 <- NA
+indDT <- match(DT_T$trajectory,celltypes)
+df_comp$lineage_T[indDT[!(is.na(indDT))]] <- DT_T$sig
+df_comp$lineage_T[df_comp$celltype%in%celltypes_not_in_lineage_comparison] <- "not_included"
+
+indDT <- match(DT_Mixl1$trajectory,celltypes)
+df_comp$lineage_Mixl1[indDT[!(is.na(indDT))]] <- DT_Mixl1$sig
+df_comp$lineage_Mixl1[df_comp$celltype%in%celltypes_not_in_lineage_comparison] <- "not_included"
+
+df_comp$dynamic_trajectory_T <- NA
+df_comp$dynamic_trajectory_Mixl1 <- NA
+
+Wilcoxon_stats_T_sub$sig[Wilcoxon_stats_T_sub$upper_bound <  Wilcoxon_stats_T_sub$lower_bound_WT] <- "down"
+Wilcoxon_stats_T_sub$sig[Wilcoxon_stats_T_sub$lower_bound >  Wilcoxon_stats_T_sub$upper_bound_WT] <- "up"
+
+indLin <- match(Wilcoxon_stats_T_sub$lineage,df_comp$celltype)
+df_comp$dynamic_trajectory_T[indLin[!(is.na(indLin))]] <- Wilcoxon_stats_T_sub$sig
+df_comp$dynamic_trajectory_T[df_comp$celltype%in%celltypes_not_in_dynamic_comparison_T] <- "not_included"
+
+Wilcoxon_stats_Mixl1_sub$sig[Wilcoxon_stats_Mixl1_sub$upper_bound <  Wilcoxon_stats_Mixl1_sub$lower_bound_WT] <- "down"
+Wilcoxon_stats_Mixl1_sub$sig[Wilcoxon_stats_Mixl1_sub$lower_bound >  Wilcoxon_stats_Mixl1_sub$upper_bound_WT] <- "up"
+
+indLin <- match(Wilcoxon_stats_Mixl1_sub$lineage,df_comp$celltype)
+df_comp$dynamic_trajectory_Mixl1[indLin[!(is.na(indLin))]] <- Wilcoxon_stats_Mixl1_sub$sig
+df_comp$dynamic_trajectory_Mixl1[df_comp$celltype%in%celltypes_not_in_dynamic_comparison_Mixl1] <- "not_included"
+
+df_comp[is.na(df_comp)] <- "not significant"
+df_comp <- df_comp[apply(df_comp,1,function(x) any(!(x%in%c("not significant","not_included")))),]
+
+df_comp_numeric <- matrix(0,nrow=nrow(df_comp),ncol=ncol(df_comp)-1)
+colnames(df_comp_numeric) <- colnames(df_comp)[-1]
+rownames(df_comp_numeric) <- df_comp[,1]
+df_comp_numeric[df_comp[,-1]=="up"] <- 1
+df_comp_numeric[df_comp[,-1]=="down"] <- -1
+df_comp_numeric[df_comp[,-1]=="enriched"] <- 1
+df_comp_numeric[df_comp[,-1]=="depleted"] <- -1
+dim(df_comp_numeric) <- c(nrow(df_comp),ncol(df_comp)-1)
+colnames(df_comp_numeric) <- colnames(df_comp)[-1]
+rownames(df_comp_numeric) <- df_comp[,1]
+df_comp_numeric[is.na(df_comp_numeric )] <- 0
+df_comp_numeric <- df_comp_numeric[apply(df_comp_numeric,1,function(x) any(x != 0)),]
+
+
+
+df_comp$DA_celltype <- "not significant"
+df_comp$DA_celltype[df_comp$celltype_T=="depleted" & df_comp$celltype_Mixl1%in%c("not significant","not_included")] <- "down in T only"
+df_comp$DA_celltype[df_comp$celltype_Mixl1=="depleted" & df_comp$celltype_T%in%c("not significant","not_included")] <- "down in Mixl1 only"
+df_comp$DA_celltype[df_comp$celltype_T=="enriched" & df_comp$celltype_Mixl1%in%c("not significant","not_included")] <- "up in T only"
+df_comp$DA_celltype[df_comp$celltype_Mixl1=="enriched" & df_comp$celltype_T%in%c("not significant","not_included")] <- "up in Mixl1 only"
+df_comp$DA_celltype[df_comp$celltype_Mixl1=="enriched" & df_comp$celltype_T=="enriched"] <- "up in both"
+df_comp$DA_celltype[df_comp$celltype_Mixl1=="depleted" & df_comp$celltype_T=="depleted"] <- "down in both"
+df_comp$DA_celltype[df_comp$celltype_Mixl1=="depleted" & df_comp$celltype_T=="enriched"] <- "up in T, down in Mixl1"
+df_comp$DA_celltype[df_comp$celltype_T=="depleted" & df_comp$celltype_Mixl1=="enriched"] <- "down in T, up in Mixl1"
+
+df_comp$DA_lineage <- "not significant"
+df_comp$DA_lineage[df_comp$lineage_T=="depleted" & df_comp$lineage_Mixl1=="not significant"] <- "down in T only"
+df_comp$DA_lineage[df_comp$lineage_Mixl1=="depleted" & df_comp$lineage_T=="not significant"] <- "down in Mixl1 only"
+df_comp$DA_lineage[df_comp$lineage_T=="enriched" & df_comp$lineage_Mixl1=="not significant"] <- "up in T only"
+df_comp$DA_lineage[df_comp$lineage_Mixl1=="enriched" & df_comp$lineage_T=="not significant"] <- "up in Mixl1 only"
+df_comp$DA_lineage[df_comp$lineage_Mixl1=="enriched" & df_comp$lineage_T=="enriched"] <- "up in both"
+df_comp$DA_lineage[df_comp$lineage_Mixl1=="depleted" & df_comp$lineage_T=="depleted"] <- "down in both"
+df_comp$DA_lineage[df_comp$lineage_Mixl1=="depleted" & df_comp$lineage_T=="enriched"] <- "up in T, down in Mixl1"
+df_comp$DA_lineage[df_comp$lineage_T=="depleted" & df_comp$lineage_Mixl1=="enriched"] <- "down in T, up in Mixl1"
+
+df_comp$DA_dynamic_trajectory <- "not significant"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_T=="down" & df_comp$dynamic_trajectory_Mixl1=="not significant"] <- "down in T only"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_Mixl1=="down" & df_comp$dynamic_trajectory_T=="not significant"] <- "down in Mixl1 only"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_T=="up" & df_comp$dynamic_trajectory_Mixl1=="not significant"] <- "up in T only"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_Mixl1=="up" & df_comp$dynamic_trajectory_T=="not significant"] <- "up in Mixl1 only"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_Mixl1=="up" & df_comp$dynamic_trajectory_T=="up"] <- "up in both"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_Mixl1=="down" & df_comp$dynamic_trajectory_T=="down"] <- "down in both"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_Mixl1=="down" & df_comp$dynamic_trajectory_T=="up"] <- "up in T, down in Mixl1"
+df_comp$DA_dynamic_trajectory[df_comp$dynamic_trajectory_T=="down" & df_comp$dynamic_trajectory_Mixl1=="up"] <- "down in T, up in Mixl1"
+
+
+ab <- data.frame(celltype=rep(df_comp$celltype,3),type=factor(c(rep("DA_celltype",nrow(df_comp)),
+            rep("DA_lineage",nrow(df_comp)),rep("DA_dynamic_trajectory",nrow(df_comp))),levels=c("DA_celltype","DA_lineage","DA_dynamic_trajectory")),value=c(df_comp$DA_celltype,df_comp$DA_lineage,df_comp$DA_dynamic_trajectory))
+xx <- order(ab$value[ab$type=="DA_celltype"])
+ab$celltype <- factor(ab$celltype,levels=ab$celltype[ab$type=="DA_celltype"][xx])
+ab <- ab[ab$value!="not significant",]
+ggplot(ab,mapping=aes(y=celltype,x=type,fill=value)) + geom_raster() + scale_fill_manual(values=colours_comp)
+
+
+```
+
+The following is a more detailed plot for T chimeras, where we distinguish between cell types that were not significant and those that were not included for a comparison because the cell type does not exist around E8.5 (for cell type level comparisons), the cell type does not exist in large numbers at E9.0 (the end of the trajectory, earlier transitional cell types, for the lineage level comparison), or the lineage is severly depleted in the chimera (for the dynamic analysis).
+
+```{r overview_T, fig.width=5,fig.height=10}
+ab <- data.frame(celltype=rep(df_comp$celltype,3),type=factor(c(rep("celltype_T",nrow(df_comp)),
+            rep("lineage_T",nrow(df_comp)),rep("dynamic_trajectory_T",nrow(df_comp))),levels=c("celltype_T","lineage_T","dynamic_trajectory_T")),value=c(df_comp$celltype_T,df_comp$lineage_T,df_comp$dynamic_trajectory_T))
+ab$celltype <- gsub("_"," ",ab$celltype)
+#xx <- order(ab$value[ab$type=="celltype_T"])
+xx <- order(ab$celltype)
+ab$celltype <- factor(ab$celltype,levels=ab$celltype[ab$type=="celltype_T"][xx])
+ab$value[ab$value=="depleted"] <- "down"
+ab$value[ab$value=="enriched"] <- "up"
+#ab <- ab[ab$value!="not significant",]
+ggplot(ab,mapping=aes(y=celltype,x=type,fill=value)) + geom_raster() +
+  scale_fill_manual(values=c("not_included" = "white","not significant" = "grey","down"="red","up"="blue"))+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ylab("")
+```
+
+Now this plot is repeated for Mixl1. 
+
+```{r overview_Mixl1, fig.width=5,fig.height=10}
+ab <- data.frame(celltype=rep(df_comp$celltype,3),type=factor(c(rep("celltype_Mixl1",nrow(df_comp)),
+            rep("lineage_Mixl1",nrow(df_comp)),rep("dynamic_trajectory_Mixl1",nrow(df_comp))),levels=c("celltype_Mixl1","lineage_Mixl1","dynamic_trajectory_Mixl1")),value=c(df_comp$celltype_Mixl1,df_comp$lineage_Mixl1,df_comp$dynamic_trajectory_Mixl1))
+#xx <- order(ab$value[ab$type=="celltype_Mixl1"])
+xx <- order(ab$celltype)
+ab$celltype <- gsub("_"," ",ab$celltype)
+ab$celltype <- factor(ab$celltype,levels=ab$celltype[ab$type=="celltype_Mixl1"][xx])
+ab$value[ab$value=="depleted"] <- "down"
+ab$value[ab$value=="enriched"] <- "up"
+#ab <- ab[ab$value!="not significant",]
+ggplot(ab,mapping=aes(y=celltype,x=type,fill=value)) + geom_raster() +
+  scale_fill_manual(values=c("not_included" = "white","not significant" = "grey","down"="red","up"="darkblue"))+ylab("")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+Saving the differential abudance and perturbSuite_kinetics results as .csv tables. 
+
+```{r}
+write.table(da_celltypes_T,"DA_celltype_T.csv",sep=",",col.names=TRUE,row.names=FALSE)
+write.table(da_celltypes_Mixl1,"DA_celltype_Mixl1.csv",sep=",",col.names=TRUE,row.names=FALSE)
+write.table(DT_T,"DA_lineage_T.csv",sep=",",col.names=TRUE,row.names=FALSE)
+write.table(DT_Mixl1,"DA_lineage_Mixl1.csv",sep=",",col.names=TRUE,row.names=FALSE)
+```
