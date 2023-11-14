@@ -1,0 +1,123 @@
+---
+title: "Calling cells for Mixl1 chimera"
+author: "Magdalena Strauss"
+output:
+  BiocStyle::html_document:
+    code_folding: hide
+    number_sections: yes
+    toc: yes
+---
+Adapted from https://github.com/MarioniLab/TChimeras2020/tree/master/2_call_cells
+
+```{r seed}
+set.seed(42)
+```
+
+
+
+```{r load, message = FALSE}
+
+library(DropletUtils)
+library(ggplot2)
+library(Matrix)
+library(BiocParallel)
+ncores = 6
+mcparam = MulticoreParam(workers = ncores)
+register(mcparam)
+library(reshape2)
+
+setwd("/nfs/research/marioni/magda/chimera")
+
+samples <- c("SIGAA5","SIGAB5","SIGAC5","SIGAD5","SIGAE5","SIGAF5")
+
+mtx_loc = paste0("/nfs/research/marioni/magda/chimera/data_Mixl1/", 
+                 samples, "_matrix_unswapped.mtx")
+bc_loc =  paste0("/nfs/research/marioni/magda/chimera/data_Mixl1/", 
+                 samples, "_barcodes_unswapped.tsv")
+
+#matrices = bplapply(mtx_loc, readMM)
+matrices = lapply(mtx_loc, readMM)
+bcs = lapply(bc_loc, function(x) read.table(x, header = FALSE, stringsAsFactors = FALSE)[,1])
+
+#correct barcode sample number to match 10X style
+for(i in 1:length(bcs)){
+  bcs[[i]] = paste0(bcs[[i]], "-", i)
+}
+```
+
+To calculate the background RNA distribution, we sum the counts in all droplets with fewer than 60 UMIs. Figure \@ref(fig:investigate-edrops) shows that the largest contributions to the background vector derive from small (~40 UMIs) or very small (<5 UMIs) barcodes.
+
+```{r investigate-edrops, fig.cap = "Background vector contributions from barcode libraries of different sizes. Sample 1 is shown, chosen arbitratily."}
+
+
+mat = matrices[[1]]
+targets = mat[, Matrix::colSums(mat)!=0 & Matrix::colSums(mat) < 60]
+sums = Matrix::colSums(targets)
+reads = as.matrix(table(sums) * as.numeric(names(table(sums))))
+
+# ggplot(data.frame(lib = sums), aes(x = lib)) +
+#   geom_histogram(binwidth = 1) +
+#   theme_bw() +
+#   labs(x = "UMI count")
+
+ggplot(data.frame(lib = reads, n = as.numeric(rownames(reads))), aes(x = n, y= lib)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  labs(x = "Barcode library UMI count", y = "Total contribution to background vector") +
+  scale_x_continuous(breaks = seq(0,100, 5))
+
+
+
+bg_vec = Matrix::rowSums(targets)
+
+
+```
+
+The total background vector consists of `r format(sum(reads), big_mark = ",")` UMI counts.
+
+
+# Calling
+
+Here, we make the calls. The number of called cells per sample is indicated in Table \@ref(tab:save).
+
+We additionally exclude small/low quality (<5000 UMI) barcodes from cell calling.
+
+
+```{r all-call}
+
+set.seed(42)
+#do call
+outs = lapply(matrices, emptyDrops, niters = 200000, ignore = 4999, BPPARAM = mcparam, lower = 60)#, retain = Inf)
+
+```
+
+
+```{r subset-cells}
+#identify cells
+sigs = lapply(outs, function(x) x$FDR <= 0.01 & !is.na(x$FDR))
+
+#subset the cells
+cells = lapply(1:length(matrices), function(i) matrices[[i]][, sigs[[i]]])
+barcodes = lapply(1:length(bcs), function(i) bcs[[i]][sigs[[i]]])
+
+#append
+counts = do.call(cbind, cells)
+barcodes = do.call(c, barcodes)
+
+```
+
+```{r save}
+#save
+dump_var = writeMM(counts, file = "/nfs/research/marioni/magda/chimera/data/Mixl1/Mixl1_raw_counts.mtx")
+write.table(barcodes, file = "/nfs/research/marioni/magda/chimera/data/Mixl1/Mixl1_barcodes.tsv", col.names = FALSE, row.names = FALSE, quote = FALSE)
+
+df_samples = data.frame(sample = 1:length(matrices), value = sapply(cells, ncol))
+write.table(df_samples , file = "/nfs/research/marioni/magda/chimera/data/Mixl1/Mixl1_samples.tsv", col.names = FALSE, row.names = FALSE, quote = FALSE)
+
+
+```
+
+# Session Info
+```{r sessinf}
+sessionInfo()
+```
