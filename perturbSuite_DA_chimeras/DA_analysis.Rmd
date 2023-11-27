@@ -1,0 +1,398 @@
+---
+title: "Differential abundance analysis on cell type and trajectory level"
+author: "Magdalena Strauss"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes  
+    keep_md: yes
+---
+
+This script performs differential abundance analysis for the T and Mixl1 chimera datasets on a cell type and trajectory level. 
+
+```{r}
+set.seed(44)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    fig.path = "plots_differential_abundance/",
+    dev = c("pdf"),
+    dpi=300
+)
+library(ggthemes)
+source("core_functions_DA_testing.R")
+source("chimera_core_functions_big_atlas.R")
+```
+
+Reading in of WOT scores 
+
+```{r}
+library(data.table)
+wot_data <- fread("wot_output/trajectory_from_9.25.txt_trajectory.txt",header=TRUE)
+atlas_meta  <- readRDS("../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
+columns.keep <- colnames(wot_data)[!(grepl("ExE",colnames(wot_data)))]
+wot_data <- as.data.frame(wot_data)
+wot_data <- wot_data[intersect(colnames(wot_data),columns.keep)]
+```
+
+Loading the chimera data sets. 
+
+```{r}
+cells_exclude <- sum(grepl("ExE",atlas_meta$celltype.clustering))
+chimeraT <- readRDS("../results/chimeraT_2020_extended_mapping_rev.rds")
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+```
+
+# Plotting mapped stages
+
+For supplementary figure
+
+```{r plot_mapped_stage_Mixl1,fig.height=2,fig.width=4}
+plot_stage(chimeraMixl1,saveFileName="plot_stage_Mixl1_rev.pdf",target="Mixl1",scale="relative") 
+```
+
+```{r plot_mapped_stage_T,fig.height=2,fig.width=4}
+plot_stage(chimeraT,saveFileName="plot_stage_T_rev.pdf",target="T",scale="relative")
+```
+
+```{r plot_mapped_stage_WT,fig.height=2,fig.width=4}
+plot_stage(chimeraWT,saveFileName="plot_stage_WT_rev.pdf",target="WT",scale="relative")
+```
+
+
+# Plotting cell types
+
+For supplementary figure
+
+```{r plot_celltype_Mixl1,fig.height=12,fig.width=8.5}
+plot_celltypes(chimeraMixl1,saveFileName="plot_celltype_Mixl1_rev.pdf",target="Mixl1") 
+```
+
+```{r plot_celltypes_T,fig.height=12,fig.width=8.5}
+plot_celltypes(chimeraT,saveFileName="plot_celltype_T_rev.pdf",target="T")
+```
+
+```{r plot_celltypes_WT,fig.height=12,fig.width=8.5}
+plot_celltypes(chimeraWT,saveFileName="plot_celltype_WT_rev.pdf",target="WT")
+```
+
+
+
+# Differential abundance per celltype
+
+Cell type-based differential abundance testing is performed to determine which cell types are depleted or enriched by T or Mixl1 knockout.
+
+## T
+
+```{r,fig.width=8.5,fig.retina=1.05,fig.height=7.5}
+da_celltypes_T <- da_per_celltype(chimeraT,chimeraWT, "T")
+saveRDS(da_celltypes_T,file="da_celltypes_T_rev.rds")
+```
+
+```{r plot_DA_celltypes_T,fig.width=10,fig.height=6.5}
+da_celltypes_T <- readRDS("da_celltypes_T_rev.rds")
+alpha <- 0.1
+fisher_test_celltypes <- da_celltypes_T
+fisher_test_celltypes <- fisher_test_celltypes[order(fisher_test_celltypes$p_values),]
+fisher_test_celltypes$sig <- "enriched"
+fisher_test_celltypes$sig[ fisher_test_celltypes$odds_ratio < 1] <- "depleted"
+fisher_test_celltypes$sig[fisher_test_celltypes$p_values > alpha] <- "not significant"
+target <- "T"
+
+p <- ggplot( fisher_test_celltypes , aes(x=log10(odds_ratio), y=-log10(p_values+1e-100),text=celltype)) +
+  labs(x=expression(paste("log"[10]," of odds ratio")),y=expression(paste("-log"[10]," of FDR adjusted p-values"))) +
+  geom_point(aes(color=sig),size=3) +
+  scale_color_manual(values=c("not significant"="grey","enriched"="darkblue","depleted" = "darkred"),name="") +
+  ggrepel::geom_text_repel(data=fisher_test_celltypes[(apply(cbind(fisher_test_celltypes$odds_ratio,1/fisher_test_celltypes$odds_ratio),1,max)>1.5) | (fisher_test_celltypes$p_values < 0.1),], 
+                           aes(x=log10(odds_ratio), y=-log10(p_values+1e-100), label=celltype), max.overlaps=Inf, size=4) +
+  theme_classic(base_size=14) + scale_y_continuous(trans=pseudo_log_trans(sigma=1,base=10))+
+  theme(
+    axis.text = element_text(size=rel(0.75), color='black'),
+    axis.title = element_text(size=rel(1.0), color='black')) + ggtitle(paste0(target,"- per celltype enrichment"))+
+  annotate("rect", xmin = Inf, xmax = 0, ymin = Inf, ymax = -Inf, fill= "blue",alpha=0.1) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = Inf, ymax = -Inf, fill= "red",alpha=0.1) 
+print(p)
+```
+
+
+## Mixl1
+
+```{r plot_DA_celltypes_Mixl1,fig.width=8.5,fig.retina=1.05,fig.height=7.5}
+da_celltypes_Mixl1 <- da_per_celltype(chimeraMixl1,chimeraWT, "Mixl1")
+saveRDS(da_celltypes_Mixl1,file="da_celltypes_Mixl1_rev.rds")
+```
+
+To compare, we repeat the celltype-based differential abundance without normalising (supplementary figure)
+
+```{r da_without_normalising,fig.width=10,fig.retina=1.05,fig.height=4}
+da_celltypes_T_without_normalising <- da_per_celltype_without_normalising(chimeraT,chimeraWT, "T")
+da_celltypes_T_without_normalising[order(da_celltypes_T_without_normalising$celltype),]
+```
+
+# Differential abundance per celltype using the 2020 celltype annotations 
+
+```{r}
+chimeraT_2020 <- readRDS("chimeraT_original_mapping.rds")
+chimeraWT_2020 <- readRDS("chimeraWT_original_mapping.rds")
+chimeraT_2020 <- chimeraT_2020[,chimeraT_2020$stage=="E8.5"]
+chimeraWT_2020 <- chimeraWT_2020[,chimeraWT_2020$stage=="E8.5"]
+yy <- complete.cases(reducedDims(chimeraWT_2020)$pca.corrected.E8.5)
+chimeraWT_2020 <- chimeraWT_2020[, yy]
+yy <- complete.cases(reducedDims(chimeraT_2020)$pca.corrected.E8.5)
+chimeraT_2020 <- chimeraT_2020[,yy]
+```
+
+```{r da_per_celltype_2020,fig.width=9,fig.retina=1.05,fig.height=3}
+da_celltypes_T_2020 <- da_per_celltype(chimeraT_2020,chimeraWT_2020, "T_2020")
+da_celltypes_T_2020[order(da_celltypes_T_2020$celltype),]
+```
+
+
+
+# Differential abundance per celltype and stage
+
+Finding cell types that are enriched or depleted per mapped stage. 
+
+```{r DA_celltype_stage_T,fig.width=9,fig.retina=1,fig.height=9}
+da_per_celltype_per_stage_T <- da_per_celltype_per_stage(chimeraT,chimeraWT, "T",stages=c("E7.75","E8.0",
+                            "E8.25","E8.5","E8.75"))
+
+```
+
+Subsetting the plot to cell types found significant overall and related lineages
+
+```{r DA_celltype_stage_T_relevant_celltypes,fig.width=9,fig.retina=1,fig.height=6}
+da_per_celltype_per_stage_T <- da_per_celltype_per_stage(chimeraT,chimeraWT, "T",stages=c("E7.75","E8.0",
+                            "E8.25","E8.5","E8.75"),subset_plot = c("Embryo proper endothelium","Dermomyotome" ,"Sclerotome",
+  "NMPs","Cranial mesoderm","Venous endothelium","Caudal epiblast","NMPs/Mesoderm-biased","Blood progenitors","Anterior somitic tissues",
+  "Notochord","Posterior somitic tissues","Spinal cord progenitors","Embryo proper endothelium","YS endothelium","Erythroid",
+  "Allantois endothelium","Lateral plate mesoderm","Mesenchyme","Hindbrain floor plate","YS mesothelium","Intermediate mesoderm",
+  "Somitic mesoderm","Presomitic mesoderm","Allantois"))
+
+```
+
+```{r DA_per_celltype_per_stage_Mixl1,fig.width=7,fig.retina=1,fig.height=9}
+da_per_celltype_per_stage_Mixl1 <- da_per_celltype_per_stage(chimeraMixl1,chimeraWT, "Mixl1",stages=c("E7.75","E8.0",
+                            "E8.25","E8.5","E8.75"))
+```
+
+Subsetting to relevant cell types
+
+```{r DA_per_celltype_per_stage_Mixl1_relevant_celltypes,fig.width=7,fig.retina=1,fig.height=9}
+da_per_celltype_per_stage_Mixl1 <- da_per_celltype_per_stage(chimeraMixl1,chimeraWT, "Mixl1",stages=c("E7.75","E8.0",
+                            "E8.25","E8.5","E8.75"),subset_plot=c(da_celltypes_Mixl1$celltype[da_celltypes_Mixl1$sig!="not significant"],
+                      unique(da_per_celltype_per_stage_Mixl1$celltype_mapped[da_per_celltype_per_stage_Mixl1$sig]),
+                      "Blood progenitors", unique(atlas_meta$celltype.clustering)[grepl("Cardio",atlas_meta$celltype.clustering)]))
+```
+
+# Differential abundance for trajectories
+
+
+```{r}
+wot_data <- wot_data[wot_data$id %in% atlas_meta$cell[!(as.vector(atlas_meta$stage) %in% c("E9.25", "E9.5","mixed_gastrulation"))],]
+```
+
+
+```{r}
+celltypes_underscore <- sapply(colnames(wot_data),function(x) gsub("[ ]","_",x))
+celltypes_underscore <- sapply(celltypes_underscore,function(x) gsub("/","_",x))
+colnames(wot_data) <- celltypes_underscore
+rownames(wot_data) <- wot_data$id
+wot_data <- wot_data[,-1]
+```
+
+
+For Mixl1
+
+```{r,fig.width=10,fig.retina=1,fig.height=5}
+DT_Mixl1 <- differential_fate_probability(chimeraMixl1,chimeraWT,"Mixl1",wot_data)
+saveRDS(DT_Mixl1,file="diff_trajectories_Mixl1_rev.rds")
+```
+
+```{r plot_DA_lineages_Mixl1,fig.width=6.5,fig.height=4.5}
+da_lineages_Mixl1 <- readRDS("diff_trajectories_Mixl1_rev.rds")
+alpha <- 0.1
+fisher_test_lineages <- da_lineages_Mixl1
+fisher_test_lineages <- fisher_test_lineages[order(fisher_test_lineages$p_values),]
+fisher_test_lineages$sig <- "enriched"
+fisher_test_lineages$sig[ fisher_test_lineages$odds_ratio < 1] <- "depleted"
+fisher_test_lineages$sig[fisher_test_lineages$p_values > alpha] <- "not significant"
+target <- "Mixl1"
+
+p <- ggplot( fisher_test_lineages , aes(x=log10(odds_ratio), y=-log10(p_values+1e-100),text=trajectory)) +
+  labs(x=expression(paste("log"[10]," of odds ratio")),y=expression(paste("-log"[10]," of FDR adjusted p-values"))) +
+  geom_point(aes(color=sig),size=3) +
+  scale_color_manual(values=c("not significant"="grey","enriched"="darkblue","depleted" = "darkred"),name="") +
+  ggrepel::geom_text_repel(data=fisher_test_lineages[(apply(cbind(fisher_test_lineages$odds_ratio,1/fisher_test_lineages$odds_ratio),1,max)>1.5) | (fisher_test_lineages$p_values < 0.1),], 
+                           aes(x=log10(odds_ratio), y=-log10(p_values+1e-100), label=trajectory), max.overlaps=Inf, size=4) +
+  theme_classic(base_size=14) + scale_y_continuous(trans=pseudo_log_trans(sigma=1,base=10))+
+  theme(
+    axis.text = element_text(size=rel(0.75), color='black'),
+    axis.title = element_text(size=rel(1.0), color='black')) + ggtitle(paste0(target,"- per lineage enrichment"))+
+  annotate("rect", xmin = Inf, xmax = 0, ymin = Inf, ymax = -Inf, fill= "blue",alpha=0.1) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = Inf, ymax = -Inf, fill= "red",alpha=0.1) 
+print(p)
+```
+
+For T
+
+```{r,fig.retina=1.05,fig.height=5,fig.width=10}
+DT_T <- differential_fate_probability(chimeraT,chimeraWT,"T",wot_data)
+saveRDS(DT_T,file="diff_trajectories_T_rev.rds")
+```
+
+```{r plot_DA_lineages_T,fig.width=6.5,fig.height=4.5}
+da_lineages_T <- readRDS("diff_trajectories_T_rev.rds")
+alpha <- 0.1
+fisher_test_lineages <- da_lineages_T
+fisher_test_lineages <- fisher_test_lineages[order(fisher_test_lineages$p_values),]
+fisher_test_lineages$sig <- "enriched"
+fisher_test_lineages$sig[ fisher_test_lineages$odds_ratio < 1] <- "depleted"
+fisher_test_lineages$sig[fisher_test_lineages$p_values > alpha] <- "not significant"
+target <- "T"
+
+p <- ggplot( fisher_test_lineages , aes(x=log10(odds_ratio), y=-log10(p_values+1e-100),text=trajectory)) +
+  labs(x=expression(paste("log"[10]," of odds ratio")),y=expression(paste("-log"[10]," of FDR adjusted p-values"))) +
+  geom_point(aes(color=sig),size=3) +
+  scale_color_manual(values=c("not significant"="grey","enriched"="darkblue","depleted" = "darkred"),name="") +
+  ggrepel::geom_text_repel(data=fisher_test_lineages[(apply(cbind(fisher_test_lineages$odds_ratio,1/fisher_test_lineages$odds_ratio),1,max)>1.5) | (fisher_test_lineages$p_values < 0.1),], 
+                           aes(x=log10(odds_ratio), y=-log10(p_values+1e-100), label=trajectory), max.overlaps=Inf, size=4) +
+  theme_classic(base_size=14) + scale_y_continuous(trans=pseudo_log_trans(sigma=1,base=10))+
+  theme(
+    axis.text = element_text(size=rel(0.75), color='black'),
+    axis.title = element_text(size=rel(1.0), color='black')) + ggtitle(paste0(target,"- per lineage enrichment"))+
+  annotate("rect", xmin = Inf, xmax = 0, ymin = Inf, ymax = -Inf, fill= "blue",alpha=0.1) +
+  annotate("rect", xmin = -Inf, xmax = 0, ymin = Inf, ymax = -Inf, fill= "red",alpha=0.1) 
+print(p)
+```
+
+
+# Comparing differential abundance per trajectory versus differential abuncance per celltype
+
+## Mixl1
+
+```{r,fig.height=7,fig.width=10}
+da_celltypes_Mixl1 <- readRDS("da_celltypes_Mixl1_rev.rds")
+DT_Mixl1 <- readRDS("diff_trajectories_Mixl1_rev.rds")
+celltypes_Mixl1_all <- unique(c(gsub("[ ]","_",da_celltypes_Mixl1$celltype),DT_Mixl1$trajectory))
+rownames(da_celltypes_Mixl1) <- gsub("[ ]","_",da_celltypes_Mixl1$celltype)
+rownames(DT_Mixl1) <- DT_Mixl1$trajectory
+odds_ratio_celltype <- rep(NA,length(celltypes_Mixl1_all))
+names(odds_ratio_celltype) <- celltypes_Mixl1_all
+odds_ratio_celltype[rownames(da_celltypes_Mixl1)] <- da_celltypes_Mixl1$odds_ratio
+odds_ratio_trajectory <- rep(NA,length(celltypes_Mixl1_all))
+names(odds_ratio_trajectory) <- celltypes_Mixl1_all
+odds_ratio_trajectory[rownames(DT_Mixl1)] <- DT_Mixl1$odds_ratio
+
+sig_celltype <- rep("not significant",length(celltypes_Mixl1_all))
+names(sig_celltype) <- celltypes_Mixl1_all
+sig_celltype[rownames(da_celltypes_Mixl1)] <- da_celltypes_Mixl1$sig
+sig_trajectory <- rep("not significant",length(celltypes_Mixl1_all))
+names(sig_trajectory) <- celltypes_Mixl1_all
+sig_trajectory[rownames(DT_Mixl1)] <- DT_Mixl1$sig
+
+df_Mixl1_celltype_trajectory <- data.frame(celltype_trajectory=celltypes_Mixl1_all,odds_ratio_celltype = odds_ratio_celltype,
+odds_ratio_trajectory=odds_ratio_trajectory,
+sig_celltype =sig_celltype,sig_trajectory = sig_trajectory)
+
+xx_c <- df_Mixl1_celltype_trajectory$sig_celltype != "not significant"
+xx_c[is.na(xx_c)] <- FALSE
+xx_t <- df_Mixl1_celltype_trajectory$sig_trajectory != "not significant"
+xx_t[is.na(xx_t)] <- FALSE
+
+xx <- rep("not significant",length(xx_c))
+xx[xx_t&xx_c] <- "celltype and lineage"
+xx[xx_t&(!(xx_c))] <- "lineage"
+xx[(!(xx_t))&xx_c] <- "celltype"
+
+yy <- df_Mixl1_celltype_trajectory$odds_ratio_trajectory > 2*df_Mixl1_celltype_trajectory$odds_ratio_celltype
+yy[yy] <- "trajectory>2*celltype"
+yy[yy==FALSE] <- "neither"
+yy[is.na(yy)] <- FALSE
+yy[df_Mixl1_celltype_trajectory$odds_ratio_celltype > 2*df_Mixl1_celltype_trajectory$odds_ratio_trajectory] <- "celltype>2*trajectory"
+df_Mixl1_celltype_trajectory$any_sig <- xx
+df_Mixl1_celltype_trajectory$celltype_trajectory_ratio <- yy
+
+```
+
+
+```{r Mixl1_celltype_versus_lineage,fig.height=6,fig.width=8}
+
+ggplot(df_Mixl1_celltype_trajectory,aes(x=odds_ratio_celltype,y=odds_ratio_trajectory,color=any_sig)) + geom_point(size=3)+theme_classic(base_size=16)+
+  xlab("odds ratio celltype") + ylab("odds ratio trajectory")+
+ ggrepel::geom_text_repel(data=df_Mixl1_celltype_trajectory[df_Mixl1_celltype_trajectory$any_sig!="not significant" | df_Mixl1_celltype_trajectory$celltype_trajectory_ratio!="neither",], 
+                             aes(x=odds_ratio_celltype, y=odds_ratio_trajectory, label=celltype_trajectory), max.overlaps=Inf, size=4)+
+  scale_color_manual(values=c("not significant"="grey","lineage"="purple","celltype"="orange","celltype and lineage" = "blue"))+ 
+scale_x_continuous(expand = c(0, 0),limits=c(0,3),trans=scales::pseudo_log_trans(sigma=0.1,base = 10)) + scale_y_continuous(expand = c(0, 0),limits=c(0,3),trans=scales::pseudo_log_trans(sigma=0.1,base = 10))+
+  labs(color="significance", shape="ratio of celltype to\ntrajectory enrichment")+#scale_size_manual(values=c("neither"=1,"trajectory>2*celltype"=2,"celltype>2*trajectory"=3))+ 
+      annotate("rect", xmin = Inf, xmax = 1, ymin = Inf, ymax = 1, fill= "blue",alpha=0.1)  + 
+      annotate("rect", xmin = -Inf, xmax = 1, ymin = Inf, ymax = 1 , fill= "purple",alpha=0.1) + 
+      annotate("rect", xmin = 1, xmax = Inf, ymin = 1, ymax = -Inf, fill= "brown",alpha=0.1) + 
+      annotate("rect", xmin = 1, xmax = -Inf, ymin = -Inf, ymax = 1, fill= "yellow",alpha=0.1) 
+```
+
+## T
+
+```{r ,fig.height=7,fig.width=10}
+da_celltypes_T <- readRDS("da_celltypes_T_rev.rds")
+DT_T <- readRDS("diff_trajectories_T_rev.rds")
+celltypes_T_all <- unique(c(gsub("[ ]","_",da_celltypes_T$celltype),DT_T$trajectory))
+rownames(da_celltypes_T) <- gsub("[ ]","_",da_celltypes_T$celltype)
+rownames(DT_T) <- DT_T$trajectory
+odds_ratio_celltype <- rep(NA,length(celltypes_T_all))
+names(odds_ratio_celltype) <- celltypes_T_all
+odds_ratio_celltype[rownames(da_celltypes_T)] <- da_celltypes_T$odds_ratio
+odds_ratio_trajectory <- rep(NA,length(celltypes_T_all))
+names(odds_ratio_trajectory) <- celltypes_T_all
+odds_ratio_trajectory[rownames(DT_T)] <- DT_T$odds_ratio
+
+sig_celltype <- rep("not significant",length(celltypes_T_all))
+names(sig_celltype) <- celltypes_T_all
+sig_celltype[rownames(da_celltypes_T)] <- da_celltypes_T$sig
+sig_trajectory <- rep("not significant",length(celltypes_T_all))
+names(sig_trajectory) <- celltypes_T_all
+sig_trajectory[rownames(DT_T)] <- DT_T$sig
+
+df_T_celltype_trajectory <- data.frame(celltype_trajectory=celltypes_T_all,odds_ratio_celltype = odds_ratio_celltype,
+odds_ratio_trajectory=odds_ratio_trajectory,
+sig_celltype =sig_celltype,sig_trajectory = sig_trajectory)
+
+xx_c <- df_T_celltype_trajectory$sig_celltype != "not significant"
+xx_c[is.na(xx_c)] <- FALSE
+xx_t <- df_T_celltype_trajectory$sig_trajectory != "not significant"
+xx_t[is.na(xx_t)] <- FALSE
+
+xx <- rep("not significant",length(xx_c))
+xx[xx_t&xx_c] <- "celltype and lineage"
+xx[xx_t&(!(xx_c))] <- "lineage"
+xx[(!(xx_t))&xx_c] <- "celltype"
+
+yy <- df_T_celltype_trajectory$odds_ratio_trajectory > 2*df_T_celltype_trajectory$odds_ratio_celltype
+yy[yy] <- "trajectory>2*celltype"
+yy[yy==FALSE] <- "neither"
+yy[is.na(yy)] <- FALSE
+yy[df_T_celltype_trajectory$odds_ratio_celltype > 2*df_T_celltype_trajectory$odds_ratio_trajectory] <- "celltype>2*trajectory"
+df_T_celltype_trajectory$any_sig <- xx
+df_T_celltype_trajectory$celltype_trajectory_ratio <- yy
+
+```
+
+
+```{r T_celltype_versus_lineage,fig.height=6,fig.width=8}
+ggplot(df_T_celltype_trajectory,aes(x=odds_ratio_celltype,y=odds_ratio_trajectory,color=any_sig)) + geom_point(size=3)+theme_classic(base_size=16)+
+  xlab("odds ratio celltype") + ylab("odds ratio trajectory")+
+ ggrepel::geom_text_repel(data=df_T_celltype_trajectory[df_T_celltype_trajectory$any_sig!="not significant" | df_T_celltype_trajectory$celltype_trajectory_ratio!="neither",], 
+                             aes(x=odds_ratio_celltype, y=odds_ratio_trajectory, label=celltype_trajectory), max.overlaps=Inf, size=4)+
+  scale_color_manual(values=c("not significant"="grey","lineage"="purple","celltype"="orange","celltype and lineage" = "blue"))+ 
+scale_x_continuous(expand = c(0, 0),limits=c(0,3),trans=scales::pseudo_log_trans(sigma=0.1,base = 10)) + scale_y_continuous(expand = c(0, 0),limits=c(0,3),trans=scales::pseudo_log_trans(sigma=0.1,base = 10))+
+  labs(color="significance", shape="ratio of celltype to\ntrajectory enrichment")+#scale_size_manual(values=c("neither"=1,"trajectory>2*celltype"=2,"celltype>2*trajectory"=3))+ 
+      annotate("rect", xmin = Inf, xmax = 1, ymin = Inf, ymax = 1, fill= "blue",alpha=0.1)  + 
+      annotate("rect", xmin = -Inf, xmax = 1, ymin = Inf, ymax = 1 , fill= "purple",alpha=0.1) + 
+      annotate("rect", xmin = 1, xmax = Inf, ymin = 1, ymax = -Inf, fill= "brown",alpha=0.1) + 
+      annotate("rect", xmin = 1, xmax = -Inf, ymin = -Inf, ymax = 1, fill= "yellow",alpha=0.1) 
+```
+
+

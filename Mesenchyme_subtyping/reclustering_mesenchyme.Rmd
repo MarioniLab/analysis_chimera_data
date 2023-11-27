@@ -1,0 +1,295 @@
+---
+title: "Mixl1 knockout depletes juxta-cardiac field"
+output:
+   BiocStyle::html_document:
+      code_folding: hide
+      number_sections: yes
+      toc: yes  
+   
+---
+
+# Loading  the data
+
+```{r,echo=FALSE,output=FALSE}
+
+#   output:
+  # html_document:
+  #   number_sections: yes
+  #   toc: yes  
+  #   keep_md: yes
+# BiocStyle::html_document:
+     # code_folding: hide
+     # number_sections: yes
+     # toc: yes  
+source("core_functions_dynamic.R")
+source("core_functions_DA_testing_general.R")
+source("chimera_core_functions_big_atlas.R")
+library(ggplot2)
+library(ggthemes)
+library(scran)
+library(scater)
+library(bluster)
+library(batchelor)
+library(destiny)
+library(biomaRt)
+library(pheatmap)
+
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+correlation_pseudotime_WT <- readRDS("results_no_split/correlation_pseudotime_WT.rds")
+correlation_pseudotime_Mixl1 <- readRDS("results_no_split/correlation_pseudotime_Mixl1.rds")
+Celltypes <- read.table("lineage_names.txt")$V1
+names(correlation_pseudotime_WT) <- Celltypes
+names(correlation_pseudotime_Mixl1) <- Celltypes
+correlation_pseudotime_WT <- correlation_pseudotime_WT[unlist(lapply(correlation_pseudotime_WT, function(x) !(is.null(x))))]
+correlation_pseudotime_Mixl1 <- correlation_pseudotime_Mixl1[unlist(lapply(correlation_pseudotime_Mixl1, function(x) !(is.null(x))))]
+```
+
+```{r,echo=F,output=F}
+set.seed(44)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE#,
+    #dev = c("pdf","png"),
+    #dpi=300
+)
+options(datatable.fread.datatable=FALSE)
+library(SingleCellExperiment)
+library(data.table)
+library(destiny)
+library(scran)
+library(scater)
+library(batchelor)
+library(e1071)
+
+```
+
+# Subclustering the mesenchyme cell population from the extended mouse gastrulation atlas
+
+
+```{r,echo=F,output=F}
+atlas_meta <- readRDS("../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
+atlas_sce <- readRDS("../data/big_atlas/big_atlas.rds")
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- logNormCounts(chimeraMixl1,size.factors=chimeraMixl1$sizeFactor)
+chimeraWT <- logNormCounts(chimeraWT,size.factors=chimeraWT$sizeFactor)
+chimeraWT <- chimeraWT[rownames(chimeraMixl1),]
+chimera_all <- multiBatchNorm(chimeraWT,chimeraMixl1)
+chimeraWT <- chimera_all[[1]]
+chimeraMixl1 <- chimera_all[[2]]
+```
+
+
+We use 50% of the cells for clustering, and then infer the hyperplanes separating the clusters using support vector machines, as in Zhang et al. (2019). Cell Systems. We then use the hyperplanes to infer the cluster membership of the remaining 50% cells so that the other 50% can be used for differential gene expression analysis across clusters. This avoid false positives for differential gene expression that we would obtain by using the same cells for both the clustering and the differential expression (double dipping). 
+
+We show the clusters on a UMAP, which we recomputed using only the Mesenchyme and Epicardium labelled cells (and not the entire reference atlas).
+
+```{r}
+gene_conv <-  read.table("../data/genes.tsv")
+cells_me_epi <- as.vector(atlas_meta$cell[atlas_meta$celltype.clustering%in%c("Epicardium","Mesenchyme")])
+atlas_sce_me_epi <- atlas_sce[,cells_me_epi] 
+atlas_sce_me_epi$celltype.revised <- atlas_meta$celltype.revised[match(colnames(atlas_sce_me_epi),atlas_meta$cell)]
+markers_JCF <- read.table("clusterMarkers_Me5_all.tsv") 
+cells_me_epi_clustering <- sample(colnames(atlas_sce_me_epi),floor(1/2*ncol(atlas_sce_me_epi)))
+g_me_epi <- clusterCells(atlas_sce_me_epi[,cells_me_epi_clustering], use.dimred="pca", 
+     BLUSPARAM=NNGraphParam(cluster.fun="louvain",k=20)) 
+dat <- data.frame(reducedDims(atlas_sce_me_epi[,cells_me_epi_clustering])$pca,
+                   g_me_epi)
+svmfit <- svm(g_me_epi ~ ., data = dat, kernel = "linear", scale = FALSE)
+cluster_predict <- predict(svmfit, reducedDims(atlas_sce_me_epi[,setdiff(colnames(atlas_sce_me_epi), cells_me_epi_clustering)])$pca)
+
+g_me_epi_all <- rep("",ncol(atlas_sce_me_epi))
+names(g_me_epi_all) <- colnames(atlas_sce_me_epi)
+g_me_epi_all[cells_me_epi_clustering] <- g_me_epi
+g_me_epi_all[names(cluster_predict)] <- cluster_predict
+
+sce_me_epi_UMAP <- uwot::umap(reducedDims(atlas_sce_me_epi)$pca,min_dist=0.5)
+reducedDims(atlas_sce_me_epi)$umap_me_epi <- sce_me_epi_UMAP
+atlas_sce_me_epi$cluster <- paste0("me_epi_",g_me_epi_all)
+colours_clusters <- c("me_epi_1"="#000000","me_epi_2"="#E69F00","me_epi_3"="#56B4E9","me_epi_4"="#009E73","me_epi_5"="#F0E442",
+                      "me_epi_6"="#0072B2","me_epi_7"="#D55E00")
+plotReducedDim(atlas_sce_me_epi,dimred="umap_me_epi",colour_by="cluster")+scale_colour_manual(values=colours_clusters)
+
+```
+
+We now colour the UMAP by the average log-normalised expression of JCF markers in a cell divided by the average log-normalised expression  (JCF score). 
+
+```{r JCF_me_epi_umap}
+atlas_sce_me_epi$JCF_score <- colMeans(logcounts(atlas_sce_me_epi[rownames(atlas_sce_me_epi)%in%rownames(markers_JCF),]))/colMeans(logcounts(atlas_sce_me_epi))
+plotReducedDim(atlas_sce_me_epi,dimred="umap_me_epi",colour_by="JCF_score")
+```
+
+The clusters separate clearly in terms of their JCF signature. 
+
+```{r JCF_score_by_cluster}
+
+df <- data.frame(JCF_score=atlas_sce_me_epi$JCF_score,cluster=atlas_sce_me_epi$cluster)
+ggplot(df,mapping=aes(x=JCF_score,color=cluster)) + geom_density(size=2)+
+  scale_color_manual(values=colours_clusters)+
+  theme_classic(base_size=20)+guides(color=guide_legend(nrow=3,override.aes = list(size=3)))+theme(legend.position = "bottom")
+```
+
+We rename the clusters based on JCF scores.
+
+```{r}
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_1"] <- "mes_higher_JCF"
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_2"] <- "mes_intermediate_JCF_1"
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_3"] <- "mes_low_JCF_1"
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_4"] <- "mes_low_JCF_2"
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_5"] <- "mes_high_JCF_1"
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_6"] <- "mes_high_JCF_2"
+atlas_sce_me_epi$cluster[atlas_sce_me_epi$cluster=="me_epi_7"] <- "mes_intermediate_JCF_2"
+```
+
+
+We compute the numbers of epicardium cells in each cluster.
+
+```{r proportion_epi_cluster}
+atlas_sce_me_epi$celltype.orig <- atlas_meta$celltype.clustering[match(colnames(atlas_sce_me_epi),atlas_meta$cell)]
+df <- data.frame(celltype = atlas_sce_me_epi$celltype.orig,cluster=atlas_sce_me_epi$cluster)
+ggplot(df,aes(x=cluster,fill=celltype)) + theme_classic(base_size=16)+ geom_histogram(stat="count") +theme(legend.position = "bottom")+scale_fill_manual(values=c("Mesenchyme"="grey","Epicardium"= "black"))+coord_flip()
+
+```
+
+Because of the concordance, we rename mes_low_JCF_2 as Epicardium. 
+
+```{r clusters_umap_me_epi}
+atlas_sce_me_epi$celltype.revised <- atlas_sce_me_epi$cluster
+atlas_sce_me_epi$celltype.revised[atlas_sce_me_epi$cluster=="mes_low_JCF_2"] <- "Epicardium"
+colours_celltype_revised <- c( "mes_higher_JCF"="#000000","mes_intermediate_JCF_1"="#E69F00","Epicardium"="red","mes_low_JCF_1"="#009E73","mes_high_JCF_1"="#F0E442", "mes_high_JCF_2"="#0072B2","mes_intermediate_JCF_2"="#D55E00")
+plotReducedDim(atlas_sce_me_epi,dimred="umap_me_epi",colour_by="celltype.revised")+scale_color_manual(values=colours_celltype_revised)
+```
+
+
+We plot the UMAP coloured by emryonic stage. 
+
+```{r stage_umap_me_epi}
+atlas_sce_me_epi$stage <- atlas_meta$stage[match(colnames(atlas_sce_me_epi),atlas_meta$cell)]
+plotReducedDim(atlas_sce_me_epi[,sample(1:ncol(atlas_sce_me_epi))],dimred="umap_me_epi",colour_by="stage") + scale_colour_viridis_d()
+```
+
+
+# Mixl1 knockout depletes JCF signature 
+
+We compute the JCF score for tdTom+ versus tdTom- Mixl1 chimera cells that map to the Mesenchyme cell type. The plot below shows that there are the distribution of JCF scores for the tdTom- cells is bimodal - there are two clearly separate peaks. For the tdTom+ cells much fewer cells have higher JCF scores. 
+
+```{r density_JCF_score_Mixl1}
+chimeraMixl1$JCF_score <- colMeans(logcounts(chimeraMixl1[rownames(chimeraMixl1)%in%rownames(markers_JCF),]))/colMeans(logcounts(chimeraMixl1))
+df_chimera <- data.frame(JCF_score=chimeraMixl1$JCF_score[chimeraMixl1$celltype.mapped=="Mesenchyme"],
+              tomato=chimeraMixl1$tomato[chimeraMixl1$celltype.mapped=="Mesenchyme"])
+ggplot(df_chimera,aes(x=JCF_score,color=tomato))+ geom_density(size=2)+scale_color_manual(values=c("FALSE"="darkblue","TRUE"="darkred"))+theme_classic(base_size=20)+guides(color=guide_legend(nrow=1,override.aes = list(size=3)))+theme(legend.position = "bottom") + ggtitle("Mixl1")
+```
+We compare this to the WT chimeras.
+
+```{r density_JCF_score_WT}
+chimeraWT$JCF_score <- colMeans(logcounts(chimeraWT[rownames(chimeraWT)%in%rownames(markers_JCF),]))/
+  colMeans(logcounts(chimeraWT))
+df_chimera <- data.frame(JCF_score=chimeraWT$JCF_score[chimeraWT$celltype.mapped=="Mesenchyme"],
+              tomato=chimeraWT$tomato[chimeraWT$celltype.mapped=="Mesenchyme"])
+ggplot(df_chimera,aes(x=JCF_score,color=tomato))+ geom_density(size=2)+scale_color_manual(values=c("FALSE"="darkblue","TRUE"="darkred"))+theme_classic(base_size=20)+guides(color=guide_legend(nrow=1,override.aes = list(size=3)))+theme(legend.position = "bottom")+ggtitle("WT")
+```
+Using a Wilcoxon rank sum test and see that the effect on the knockout cells is significant for Mixl1 and not for the WT chimeras. 
+
+```{r}
+wilcox_WT <- wilcox.test(chimeraWT$JCF_score[chimeraWT$tomato==TRUE&chimeraWT$celltype.mapped=="Mesenchyme"],chimeraWT$JCF_score[chimeraWT$tomato==FALSE&chimeraWT$celltype.mapped=="Mesenchyme"],conf.int = TRUE)
+wilcox_Mixl1 <- wilcox.test(chimeraMixl1$JCF_score[chimeraMixl1$tomato==TRUE&chimeraMixl1$celltype.mapped=="Mesenchyme"],chimeraMixl1$JCF_score[chimeraMixl1$tomato==FALSE&chimeraMixl1$celltype.mapped=="Mesenchyme"],conf.int = TRUE)
+wilcox_WT
+wilcox_Mixl1
+```
+
+The above already suggests a depletion of JCF as a result of Mixl1 knockout.
+
+# Subcluster depletion for Mixl1 knockout cells
+
+We now investigate how this difference in JCF score between the tdTom+ and tdTom- population translates into which cluster of Mesenchyme atlas cells the respective chimera cell is most similar to. 
+
+```{r clusters_Mixl1}
+chimeraMixl1_me_epi <- chimeraMixl1[,chimeraMixl1$closest.cell%in%colnames(atlas_sce_me_epi)]
+chimeraMixl1_me_epi$cluster_mes <- atlas_sce_me_epi[,chimeraMixl1_me_epi$closest.cell]$celltype.revised
+df_cluster <- data.frame(cluster=chimeraMixl1_me_epi$cluster_mes,tomato=chimeraMixl1_me_epi$tomato)
+ggplot(df_cluster,mapping=aes(x=cluster,fill=tomato))+geom_histogram(stat="count") + theme_classic(base_size=20) + scale_fill_manual(values=c("TRUE"="red","FALSE"="darkblue")) + xlab("")+ coord_flip() + theme(legend.position = "bottom")
+```
+We repeat this for the WT chimeras.
+
+```{r clusters_WT}
+chimeraWT_me_epi <- chimeraWT[,chimeraWT$closest.cell%in%colnames(atlas_sce_me_epi)]
+chimeraWT_me_epi$cluster_mes <- atlas_sce_me_epi[,chimeraWT_me_epi$closest.cell]$celltype.revised
+df_cluster <- data.frame(cluster=chimeraWT_me_epi$cluster_mes,tomato=chimeraWT_me_epi$tomato)
+ggplot(df_cluster,mapping=aes(x=cluster,fill=tomato))+geom_histogram(stat="count") + theme_classic(base_size=20) + scale_fill_manual(values=c("TRUE"="red","FALSE"="darkblue")) + xlab("")+ coord_flip() + theme(legend.position = "bottom")
+```
+
+We perform perturbSuite_DA. 
+
+```{r}
+chimeraWT[,colnames(chimeraWT_me_epi)]$celltype.mapped <- chimeraWT_me_epi$cluster_mes
+chimeraMixl1[,colnames(chimeraMixl1_me_epi)]$celltype.mapped <- chimeraMixl1_me_epi$cluster_mes
+source("core_functions_DA_testing.R")
+da_results_revised <- da_per_celltype(chimeraMixl1,chimeraWT, target="Mixl1",alpha=0.1,plot_celltypes=unique(chimeraWT_me_epi$cluster_mes))
+```
+
+
+
+# Revising cell types in epicardium trajectory
+
+First, we plot the trajectory without relabelling. 
+
+```{r dm_no_relabel}
+diffusion_map_epicardium <- readRDS(paste0("results_no_split/Epicardium/Epicardium_diffusion_map_sublineage_Lateral_plate_mesoderm.rds"))
+stages <- atlas_meta$stage[match(names(diffusion_map_epicardium$DC1),atlas_meta$cell)]
+stages_double <- as.double(substring(stages,2,10))
+cors <- cor(diffusion_map_epicardium@eigenvectors,stages_double)
+diffusion_map_epicardium@eigenvectors[,cors <0 ] <- -diffusion_map_epicardium@eigenvectors[,cors <0 ]
+atlas_meta$celltype.revised <- atlas_meta$celltype.clustering
+atlas_meta$celltype.revised[match(colnames(atlas_sce_me_epi),atlas_meta$cell)] <- atlas_sce_me_epi$celltype.revised
+celltype_subcluster <- atlas_meta$celltype.revised[match(names(diffusion_map_epicardium$DC1),atlas_meta$cell)]
+celltype_orig <- atlas_meta$celltype.clustering[match(names(diffusion_map_epicardium$DC1),atlas_meta$cell)]
+xx <- sample(1:length(diffusion_map_epicardium$DC1))
+tmp <- data.frame(DC1 = eigenvectors(diffusion_map_epicardium)[xx, 1],
+                    DC2 = eigenvectors(diffusion_map_epicardium)[xx, 2],
+                    celltype_subcluster = celltype_subcluster[xx],
+                  celltype_orig = celltype_orig[xx])
+
+
+  p1 <- ggplot(tmp, aes(x = DC1, y = DC2, colour = celltype_orig)) +
+    geom_point(size=2,alpha=1) + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 2") +
+    theme_classic(base_size=16) + theme(legend.position = "bottom",legend.box="vertical",legend.margin=margin())+
+    labs(color="")+ guides(color = guide_legend(nrow=5,override.aes = list(size = 3,alpha=1)))+ 
+    scale_color_manual(values=celltype_colours_final[unique(tmp$celltype_orig)])
+  print(p1)
+
+```
+
+Now we replot the trajectory with the new labels. 
+
+```{r dm_combined}
+  p1 <- ggplot(tmp, aes(x = DC1, y = DC2, colour = celltype_subcluster)) +
+    geom_point(size=2,alpha=1) + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 2") +
+    theme_classic(base_size=16) + theme(legend.position = "bottom",legend.box="vertical",legend.margin=margin())+
+    labs(color="")+ guides(color = guide_legend(nrow=5,override.aes = list(size = 3,alpha=1)))+ scale_color_manual(values=c(colours_celltype_revised,  "Lateral plate mesoderm" = "purple", "Cardiomyocytes FHF 1" = "grey", "Cardiomyocytes SHF 1" = "magenta" ))
+  print(p1)
+
+```
+
+# Saving updated cell type annotation for the reference data set
+
+```{r}
+atlas_meta$celltype.revised <- atlas_meta$celltype.clustering
+atlas_meta$celltype.revised[match(colnames(atlas_sce_me_epi),atlas_meta$cell)] <- atlas_sce_me_epi$celltype.revised
+saveRDS(atlas_meta,"../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
+```
+
+Saving expression matrix and UMAP coordinates
+
+```{r}
+umap_and_cluster <- cbind(as.matrix(reducedDims(atlas_sce_me_epi)$umap_me_epi),as.vector(atlas_sce_me_epi$celltype.revised))
+colnames(umap_and_cluster) <- c("umap_x","umap_y","cluster")
+write.table(umap_and_cluster,file='umap_script.csv',quote=FALSE,row.names=TRUE,col.names=TRUE,sep=",")
+
+```

@@ -1,4 +1,5 @@
-# This script contains the same functions as core_functions_DA_testing_general.R,
+# This script implements perturbSuite_DA for chimera data sets. 
+# It contains the same functions as core_functions_DA_testing_general.R,
 # but with input parameters adapted to the chimera data, and an additional 
 # function to test for differential abundance per mapped cell type and stage
 
@@ -11,8 +12,10 @@ library(scran)
 library(scater)
 source("chimera_core_functions_big_atlas.R")
 
-#' with control experiment involving several celltypes.  
-#'  
+#' Performs perturbSuite_DA_celltype
+#' Computes and plots differential abundance per mapped cell type for perturbation experiments
+#' with control experiment involving several cell types, using the normalisation step 
+#' included in perturbSuite_DA. 
 #' @title da_per_celltype
 #' @param sce_chimera SingleCellExperiment for the target chimera dataset, 
 #' colData needs to include the slots 'tomato' (TRUE/FALSE) for the presence
@@ -96,7 +99,22 @@ da_per_celltype <- function(sce_chimera,chimera_WT, target,alpha=0.1){
 }
 
 
-
+#' Computes and plots differential abundance per mapped cell type for perturbation experiments
+#' with control experiment involving several cell types, WITHOUT perturbSuite_DA normalisation.
+#' @title da_per_celltype_without_normalising
+#' @param sce_chimera SingleCellExperiment for the target chimera dataset, 
+#' colData needs to include the slots 'tomato' (TRUE/FALSE) for the presence
+#' of the fluorescent marker indicating the knockout, and 'celltype.mapped'
+#' @param chimera_WT SingleCellExperiment for the control experiment, 
+#' colData needs to include the slots 'tomato' (TRUE/FALSE) for the presence
+#' of the fluorescent marker and 'celltype.mapped'
+#' @param target string, name of the gene that was the target of the knockout
+#' @param alpha significance level, default is 10%
+#' @return data.frame with the following columns: celltype, odds_ratio-odds ratio of the percentage of 
+#' tomato positive cells among the target chimera cells of the celltype versus the respective ratio for the control experiment, 
+#' p_values, sig- whether a celltype is significantly enriched, depleted, or not enriched,
+#' @export
+#' @examples 
 
 da_per_celltype_without_normalising <- function(sce_chimera,chimera_WT, target,alpha=0.1){
   sce_chimera_tomato <- sce_chimera[,sce_chimera$tomato==TRUE]
@@ -138,8 +156,8 @@ da_per_celltype_without_normalising <- function(sce_chimera,chimera_WT, target,a
   return(fisher_test_celltypes)
 }
 
-#' Computes and plots differential abundance per mapped celltype and stage for perturbation experiments
-#' with control experiment involving several celltypes.  
+#' Computes and plots differential abundance per mapped cell type and stage for perturbation experiments
+#' with control experiment involving several cell types.  
 #' @title da_per_celltype_per_stage
 #' @param sce_chimera SingleCellExperiment for the target chimera dataset, 
 #' colData needs to include the slots 'tomato' (TRUE/FALSE) for the presence

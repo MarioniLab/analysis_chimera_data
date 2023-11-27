@@ -3,25 +3,24 @@
 
 
 library(scran)
-library(irlba)
 library(scater)
 library(SingleCellExperiment)
-library(Matrix)
-library(scales)
-library(BiocParallel)
-library(BiocNeighbors)
-library(batchelor)
-library(ggbeeswarm)
-library(RColorBrewer)
-library(aroma.light)
-library(ggrepel)
 library(viridis)
-library(gridExtra)
 
 
+#' Identifies highly variable genes in chimera data sets. 
+#' @title getHVGs
+#' @param sce chimera data set as SingleCellExperiment
+#' @param min_mean minimum mean expression level above which a gene is included
+#' in the variance modelling to find the highly variable genes. The default is 0.001.
+#' @param FDR FDR threshold for the variance modelling, cutoff for including genes 
+#' in the highly variable gene list
+#' @return vector of highly variable genes
+#' @export
 getHVGs <- function(sce,min_mean = 0.001,FDR = 0.01,yGenes=read.table("data/ygenes.tab", stringsAsFactors = FALSE)[,1])
 {
-  exclude <- c("ENSMUSG00000086503",yGenes,"tomato-td")
+  
+  exclude <- c("ENSMUSG00000086503",yGenes,"tomato-td")#
   stats <- modelGeneVar(sce,subset.row = setdiff(rownames(sce),exclude),
                         block=sce$sample)
   stats <- stats[stats$mean > min_mean,]
@@ -30,9 +29,17 @@ getHVGs <- function(sce,min_mean = 0.001,FDR = 0.01,yGenes=read.table("data/ygen
 } 
 
 
+#' Identifies the most frequent label (e.g. cell type) among the
+#' k closest cells of a chimera cell in the atlas
+#' taken from
+# https://github.com/MarioniLab/EmbryoTimecourse2018/blob/master/analysis_scripts/atlas/core_functions.R
+#' @title getmode
+#' @param v vector of labels, such as cell type
+#' @param dist distance of the cells from the chimera cell
+#' @return most frequent label (in case of ties the one of the neighbour cell
+#' closest to the chimera cell)
+#' @export
 getmode <- function(v, dist) {
-  # taken from
-  # https://github.com/MarioniLab/EmbryoTimecourse2018/blob/master/analysis_scripts/atlas/core_functions.R
   tab = table(v)
   #if tie, break to shortest distance
   if(sum(tab == max(tab)) > 1){
@@ -46,7 +53,9 @@ getmode <- function(v, dist) {
 }
 
 
+###
 
+###
 
 plot_target_gene_expression <- function(sce, target_gene)
 {
@@ -60,45 +69,7 @@ plot_target_gene_expression <- function(sce, target_gene)
   print(umap_pl)
 }
 
-plotDAbeeswarm_edited <- function(da.res, group.by=NULL, alpha=0.1, subset.nhoods=NULL){
-  #taken from milo with very minor adaptations
-  if (!is.null(group.by)) {
-    if (!group.by %in% colnames(da.res)) {
-      stop(group.by, " is not a column in da.res. Have you forgot to run annotateNhoods(x, da.res, ", group.by,")?")
-    }
-    if (is.numeric(da.res[,group.by])) {
-      stop(group.by, " is a numeric variable. Please bin to use for grouping.")
-    }
-    da.res <- mutate(da.res, group_by = da.res[,group.by])
-  } else {
-    da.res <- mutate(da.res, group_by = "g1")
-  }
-  
-  if (!is.factor(da.res[,"group_by"])) {
-    message("Converting group.by to factor...")
-    da.res <- mutate(da.res, factor(group_by, levels=unique(group_by)))
-    # anno_vec <- factor(anno_vec, levels=unique(anno_vec))
-  }
-  
-  if (!is.null(subset.nhoods)) {
-    da.res <- da.res[subset.nhoods,]
-  }
-  
-  da.res %>%
-    mutate(is_signif = ifelse(FDR < alpha, 1, 0)) %>%
-    mutate(log_odds_ratio_color = ifelse(is_signif==1, log_odds_ratio, NA)) %>%
-    arrange(group_by) %>%
-    mutate(Nhood=factor(Nhood, levels=unique(Nhood))) %>%
-    ggplot(aes(group_by, log_odds_ratio, color=log_odds_ratio_color)) +
-    scale_color_gradient2() +
-    guides(color="none") +
-    xlab(group.by) + ylab("Log Fold Change") +
-    geom_quasirandom(alpha=1) +
-    coord_flip() +
-    theme_bw(base_size=22) +
-    theme(strip.text.y =  element_text(angle=0))
-  
-}
+
 
 plot_celltypes <- function(chimeraTarget,saveFileName="temp.pdf",target=""){
   Target_tomato_neg <- chimeraTarget[,chimeraTarget$tomato==F]
@@ -217,15 +188,6 @@ cell_cycle_scoring <- function(sce)
     sce$phase[sce$sample == jj]  <- SeuratObj$Phase
   }
   return(sce)
-}
-
-
-apoptosis_score <-  function(logcounts){
-  ensembl = useMart("ensembl",dataset="mmusculus_gene_ensembl") 
-  #positive regulation of apoptotic process
-  gene.data <- getBM(attributes=c('hgnc_symbol', 'ensembl_transcript_id', 'go_id'),
-                     filters = 'go_id', values = 'GO:0043065', mart = ensembl)
-  return(gene_data)
 }
 
 

@@ -1,0 +1,75 @@
+---
+title: "Mixl1 expression in WT and Mixl1 chimeras"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes  
+    keep_md: yes
+---
+
+First we load the processed chimera data, which has been mapped to the atlas.  
+
+```{r, echo=FALSE, output=FALSE}
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    dev = "pdf",
+    dpi=300
+)
+
+library(scran)
+library(scater)
+library(ggplot2)
+
+chimeraT <- readRDS("../results/chimeraT_2020_extended_mapping_rev.rds")
+chimeraT <- logNormCounts(chimeraT,size_factors=chimeraT$sizeFactor)
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraWT <- logNormCounts(chimeraWT,size_factors=chimeraWT$sizeFactor)
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+```
+
+
+```{r}
+chimeraMixl1 <- logNormCounts(chimeraMixl1)
+chimeraT <- logNormCounts(chimeraT)
+chimeraWT <- logNormCounts(chimeraWT)
+chimeraMixl1$T_expr <- as.vector(logcounts(chimeraMixl1["ENSMUSG00000062327",]))
+chimeraT$Mixl1_expr <- as.vector(logcounts(chimeraT["ENSMUSG00000026497",]))
+chimeraWT$T_expr <- as.vector(logcounts(chimeraWT["ENSMUSG00000062327",]))
+chimeraWT$Mixl1_expr <- as.vector(logcounts(chimeraWT["ENSMUSG00000026497",]))
+```
+
+
+We plot Mixl1 expression for WT chimeras for those cell types for which both tomato positive and tomato negative cells exist and either tomato positive or tomato negative cells have an average normalised log-expression of at least 0.033, and for which there are at least 50 tomato positive cells.
+
+```{r Mixl1_expr_WT_chimeras}
+chimeraWT_overall_Mixl1_expression_celltype <- as.data.frame(colData(chimeraWT)[c("Mixl1_expr","celltype.mapped","tomato")]) %>% dplyr::group_by_all()
+overall_number_tomato_pos <- table(chimeraWT_overall_Mixl1_expression_celltype$celltype.mapped[chimeraWT_overall_Mixl1_expression_celltype$tomato])
+celltypes.keep <- names(overall_number_tomato_pos)[overall_number_tomato_pos>=50]
+chimeraWT_overall_Mixl1_expression_celltype <- chimeraWT_overall_Mixl1_expression_celltype[chimeraWT_overall_Mixl1_expression_celltype$celltype.mapped%in%celltypes.keep,]
+chimeraWT_overall_Mixl1_expression_celltype_count <- aggregate(Mixl1_expr~.,chimeraWT_overall_Mixl1_expression_celltype,mean)
+celltypes_filter_1 <- names(table(chimeraWT_overall_Mixl1_expression_celltype_count$celltype.mapped))[table(chimeraWT_overall_Mixl1_expression_celltype_count$celltype.mapped) == 2]
+chimeraWT_overall_Mixl1_expression_celltype_count <- chimeraWT_overall_Mixl1_expression_celltype_count[chimeraWT_overall_Mixl1_expression_celltype_count$celltype.mapped%in%celltypes_filter_1,]
+celltypes_filter <- sapply(1:length(chimeraWT_overall_Mixl1_expression_celltype_count$celltype.mapped),
+                           function(x) any(chimeraWT_overall_Mixl1_expression_celltype_count$Mixl1_expr[chimeraWT_overall_Mixl1_expression_celltype_count$celltype.mapped==chimeraWT_overall_Mixl1_expression_celltype_count$celltype.mapped[x]] >= 0.033))
+ggplot(chimeraWT_overall_Mixl1_expression_celltype_count[celltypes_filter,],aes(x=celltype.mapped,y=Mixl1_expr,fill=tomato)) + geom_bar(stat="identity",position = "dodge") + theme_classic()+coord_flip() + scale_fill_manual(values=c("TRUE"="darkred","FALSE"="darkblue"),labels=c("positive","negative")) + ggtitle("Average Mixl1 expression per cell type\nin WT chimeras")+scale_y_continuous(trans=pseudo_log_trans(sigma=0.05,base=500),expand = c(0, 0),breaks=c(0.1,1,10,100))+xlab("")
+```
+
+We plot Mixl1 expression for T chimeras for those cell types for which both tomato positive and tomato negative cells exist and either tomato positive or tomato negative cells have an average expression of at least 0.033, and for which there are at least 50 tomato positive cells. 
+
+```{r Mixl1_expr_T_chimeras}
+chimeraT_overall_Mixl1_expression_celltype <- as.data.frame(colData(chimeraT)[c("Mixl1_expr","celltype.mapped","tomato")]) %>% dplyr::group_by_all()
+overall_number_tomato_pos <- table(chimeraT_overall_Mixl1_expression_celltype$celltype.mapped[chimeraT_overall_Mixl1_expression_celltype$tomato])
+celltypes.keep <- names(overall_number_tomato_pos)[overall_number_tomato_pos>=50]
+chimeraT_overall_Mixl1_expression_celltype <- chimeraT_overall_Mixl1_expression_celltype[chimeraT_overall_Mixl1_expression_celltype$celltype.mapped%in%celltypes.keep,]
+chimeraT_overall_Mixl1_expression_celltype_count <- aggregate(Mixl1_expr~.,chimeraT_overall_Mixl1_expression_celltype,mean)
+celltypes_filter_1 <- names(table(chimeraT_overall_Mixl1_expression_celltype_count$celltype.mapped))[table(chimeraT_overall_Mixl1_expression_celltype_count$celltype.mapped) == 2]
+chimeraT_overall_Mixl1_expression_celltype_count <- chimeraT_overall_Mixl1_expression_celltype_count[chimeraT_overall_Mixl1_expression_celltype_count$celltype.mapped%in%celltypes_filter_1,]
+celltypes_filter <- sapply(1:length(chimeraT_overall_Mixl1_expression_celltype_count$celltype.mapped),
+                           function(x) any(chimeraT_overall_Mixl1_expression_celltype_count$Mixl1_expr[chimeraT_overall_Mixl1_expression_celltype_count$celltype.mapped==chimeraT_overall_Mixl1_expression_celltype_count$celltype.mapped[x]] >= 0.033))
+ggplot(chimeraT_overall_Mixl1_expression_celltype_count[celltypes_filter,],aes(x=celltype.mapped,y=Mixl1_expr,fill=tomato)) + geom_bar(stat="identity",position = "dodge") + theme_classic()+coord_flip() + scale_fill_manual(values=c("TRUE"="darkred","FALSE"="darkblue"),labels=c("positive","negative")) + ggtitle("Average Mixl1 expression per cell type\nin T chimeras") +scale_y_continuous(trans=pseudo_log_trans(sigma=0.05,base=500),expand = c(0, 0),breaks=c(0.01,0.1,0.2,0.4))+xlab("")
+```
+
+

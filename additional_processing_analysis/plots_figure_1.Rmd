@@ -1,0 +1,241 @@
+---
+title: "Additional plots for Figure 1 and Supplementary Figure 1"
+author: "Magdalena Strauss"
+output:
+  html_document:
+    keep_md: true
+---
+
+This script is the R code used to create figure panels for Figure 1 and Supplementary Figure 1 not created by other scripts. 
+
+```{r}
+set.seed(44)
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    dev = c("pdf","png"),
+    dpi=300
+)
+library(ggthemes)
+library(ggpubr)
+.libPaths("/hps/software/users/marioni/magda/miniconda3/envs/R4.1/lib/R/library")
+source("chimera_core_functions_big_atlas.R")
+library(patchwork)
+```
+
+We plot percentage donut plots for the figure panel illustrating the sampling bias correction. 
+
+```{r}
+plot_donut_percentage <- function(percentage){
+  data <- data.frame(
+  category=c("perturbed", "unperturbed"),
+  count=c(percentage,100-percentage))
+  data$fraction = data$count/sum(data$count)
+  data$theta_max = cumsum(data$fraction)
+  data$theta_min = c(0, head(data$theta_max, n=-1))
+  data$position_label <- (data$theta_min + data$theta_max)*0.5
+  data$label <- paste0(data$count,"%")
+
+  ggplot(data, aes(ymax=theta_max, ymin=theta_min, xmax=2, xmin=1, fill=category)) +
+    geom_rect() +
+    geom_label( x=1.5, aes(y=position_label, label=label), size=10,color="white") +
+    scale_fill_manual(values=c("darkred","darkblue")) +
+    coord_polar(theta="y") +
+    xlim(c(0.35, 2)) +
+    theme_void() +
+    theme(legend.position = "none")
+ 
+}
+```
+```{r, donut_50}
+plot_donut_percentage(50)
+```
+```{r, donut_35}
+plot_donut_percentage(35)
+```
+
+```{r, donut_0}
+plot_donut_percentage(0)
+```
+
+```{r, donut_59}
+plot_donut_percentage(59)
+```
+
+```{r}
+atlas_sce <- readRDS("../data/big_atlas/big_atlas.rds")
+atlas_meta  <- readRDS("../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
+atlas_meta <- atlas_meta[match(colnames(atlas_sce),atlas_meta$cell),]
+atlas_sce$celltype.clustering <- atlas_meta$celltype.clustering
+atlas_sce$stage <- atlas_meta$stage
+atlas_sce$mapping <- "atlas"
+atlas_sce$nr_cells <- 1
+chimeraT <- readRDS("../results/chimeraT_2020_extended_mapping_rev.rds")
+chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
+chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
+chimera_Mixl1_tomato_pos <- chimeraT[,chimeraT$tomato]
+chimeraT_tomato_neg <- chimeraT[,!(chimeraT$tomato)]
+chimera_T_tomato_pos <- chimeraT[,chimeraT$tomato]
+chimera_WT_tomato_pos <- chimeraWT[,chimeraWT$tomato]
+chimeraWT_tomato_neg <- chimeraWT[,!(chimeraWT$tomato)]
+chimera_Mixl1_tomato_pos <- chimeraMixl1[,chimeraMixl1$tomato]
+chimeraMixl1_tomato_neg <- chimeraMixl1[,!(chimeraMixl1$tomato)]
+atlas_sce$T_expression <- logcounts(atlas_sce)["ENSMUSG00000062327",]
+atlas_sce$Mixl1_expression <- logcounts(atlas_sce)["ENSMUSG00000026497",]
+```
+
+We plot UMAPs for the extended mouse gastrulation atlas labelled by cell type.
+
+```{r atlas_celltypes,dev='png'}
+p_atlas_celltype <- plotReducedDim(atlas_sce[,sample(1:ncol(atlas_sce))],colour_by = "celltype.clustering",dimred = "umap",point_size=1) + scale_color_manual(values=celltype_colours_final)+theme(legend.position = "bottom",
+            legend.title=element_blank(),axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank()) + guides(color=guide_legend(ncol=4))+theme(legend.position = "None") 
+print(p_atlas_celltype)
+```
+
+```{r atlas_celltypes_legend,dev='pdf'}
+legend_atlas_celltype <- get_legend(p_atlas_celltype)
+as_ggplot(legend_atlas_celltype)
+```
+
+```{r atlas_celltypes_with_legend,dev=c('pdf','svg')}
+p_atlas_celltype <- plotReducedDim(atlas_sce[,sample(1:ncol(atlas_sce))],colour_by = "celltype.clustering",dimred = "umap",point_size=1) + scale_color_manual(values=celltype_colours_final)+theme(legend.position = "bottom",
+            legend.title=element_blank(),axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank()) + guides(color=guide_legend(ncol=4))+theme(legend.position = "Bottom") 
+print(p_atlas_celltype)
+```
+
+We repeat the UMAP plots coloured by stage. 
+
+```{r atlas_stage, dev='png'}
+p_atlas_stage <- plotReducedDim(atlas_sce[,sample(1:ncol(atlas_sce))],colour_by = "stage",dimred = "umap",point_size=1) + theme(legend.position = "bottom",
+                                                                              legend.title=element_blank(),axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank()) + scale_color_viridis_d()
+print(p_atlas_stage)
+# 
+# print(p_atlas_stage)
+# pdf(paste0(fig_path,"p_atlas_stage.pdf"))
+# print(p_atlas_stage)
+# png(paste0(fig_path,"p_atlas_stage.png"))
+```
+
+```{r atlas_stage_legend,dev='pdf'}
+legend_atlas_stage <- get_legend(p_atlas_stage)
+as_ggplot(legend_atlas_stage)
+```
+
+We plot nearest neighbours of chimera cells in atlas, first for WT.
+
+```{r mapping_WT_chimeras, dev='png'}
+cells <- chimeraWT$closest.cell
+atlas_sub <- atlas_sce[,colnames(atlas_sce)%in%cells]
+nr_WT_positive <- table(chimera_WT_tomato_pos$closest.cell[chimera_WT_tomato_pos$closest.cell%in%colnames(atlas_sub)])
+nr_WT_negative <- table(chimeraWT_tomato_neg$closest.cell[chimeraWT_tomato_neg$closest.cell%in%colnames(atlas_sub)])
+atlas_WT_tomato_pos <- atlas_sub[,colnames(atlas_sub)%in%chimera_WT_tomato_pos$closest.cell]
+atlas_WT_tomato_pos$nr_cells <- nr_WT_positive[colnames(atlas_WT_tomato_pos)]
+atlas_WT_tomato_neg <- atlas_sub[,colnames(atlas_sub)%in%chimeraWT_tomato_neg$closest.cell]
+atlas_WT_tomato_neg$nr_cells <- nr_WT_negative[colnames(atlas_WT_tomato_neg)]
+sce_temp <- cbind(atlas_WT_tomato_pos,atlas_WT_tomato_neg)
+sce_temp$mapping <- c( rep("WT tomato pos",ncol(atlas_WT_tomato_pos)),
+                      rep("WT tomato neg",ncol(atlas_WT_tomato_neg)))
+atlas_sub$mapping <- "atlas"
+atlas_sub$nr_cells <- 1
+sce_temp <- sce_temp[,sample(1:ncol(sce_temp))]
+sce_temp_3 <- cbind(atlas_sce,sce_temp)
+  
+  
+p3 <- ggplot(mapping=aes(x=reducedDims(sce_temp_3)$umap[,1],
+                   y=reducedDims(sce_temp_3)$umap[,2],
+                   color=sce_temp_3$mapping,size=sce_temp_3$nr_cells)) + geom_jitter() + theme_classic(base_size=10)+ggtitle("WT")+
+  scale_color_manual(values=c( "WT tomato neg"="darkblue","WT tomato pos"="red","atlas"="lightgrey"))+xlab("umap 1")+ylab("umap  2") + theme(legend.position = "none", legend.title=element_blank(),axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank(),legend.text=element_text(size=12))
+
+print(p3)
+```
+
+```{r mapping_WT_chimeras_legend,dev='svg',dev='pdf'}
+legend_mapping_WT_chimeras <- get_legend(p3)
+as_ggplot(legend_mapping_WT_chimeras)
+```
+
+Now for T
+
+```{r mapping_T_chimeras, dev='png'}
+cells <- chimeraT$closest.cell
+atlas_sub <- atlas_sce[,colnames(atlas_sce)%in%cells]
+nr_T_positive <- table(chimera_T_tomato_pos$closest.cell[chimera_T_tomato_pos$closest.cell%in%colnames(atlas_sub)])
+nr_T_negative <- table(chimeraT_tomato_neg$closest.cell[chimeraT_tomato_neg$closest.cell%in%colnames(atlas_sub)])
+atlas_T_tomato_pos <- atlas_sub[,colnames(atlas_sub)%in%chimera_T_tomato_pos$closest.cell]
+atlas_T_tomato_pos$nr_cells <- nr_T_positive[colnames(atlas_T_tomato_pos)]
+atlas_T_tomato_neg <- atlas_sub[,colnames(atlas_sub)%in%chimeraT_tomato_neg$closest.cell]
+atlas_T_tomato_neg$nr_cells <- nr_T_negative[colnames(atlas_T_tomato_neg)]
+sce_temp <- cbind(atlas_T_tomato_pos,atlas_T_tomato_neg)
+sce_temp$mapping <- c( rep("T tomato pos",ncol(atlas_T_tomato_pos)),
+                      rep("T tomato neg",ncol(atlas_T_tomato_neg)))
+atlas_sub$mapping <- "atlas"
+atlas_sub$nr_cells <- 1
+sce_temp <- sce_temp[,sample(1:ncol(sce_temp))]
+sce_temp_3 <- cbind(atlas_sce,sce_temp)
+  
+  
+p3 <- ggplot(mapping=aes(x=reducedDims(sce_temp_3)$umap[,1],
+                   y=reducedDims(sce_temp_3)$umap[,2],
+                   color=sce_temp_3$mapping,size=sce_temp_3$nr_cells)) + geom_jitter() + theme_classic(base_size=10)+ggtitle("T")+
+  scale_color_manual(values=c( "T tomato neg"="darkblue","T tomato pos"="red","atlas"="lightgrey"))+xlab("umap 1")+ylab("umap 2") + theme(legend.position = "none", legend.title=element_blank(),axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank(),legend.text=element_text(size=12))
+
+print(p3)
+```
+
+```{r mapping_T_chimeras_legend,dev='svg',dev='pdf'}
+legend_mapping_T_chimeras <- get_legend(p3)
+as_ggplot(legend_mapping_T_chimeras)
+```
+
+And finally for Mixl1 chimeras
+
+```{r mapping_Mixl1_chimeras, dev='png'}
+cells <- chimeraMixl1$closest.cell
+atlas_sub <- atlas_sce[,colnames(atlas_sce)%in%cells]
+nr_Mixl1_positive <- table(chimera_Mixl1_tomato_pos$closest.cell[chimera_Mixl1_tomato_pos$closest.cell%in%colnames(atlas_sub)])
+nr_Mixl1_negative <- table(chimeraMixl1_tomato_neg$closest.cell[chimeraMixl1_tomato_neg$closest.cell%in%colnames(atlas_sub)])
+atlas_Mixl1_tomato_pos <- atlas_sub[,colnames(atlas_sub)%in%chimera_Mixl1_tomato_pos$closest.cell]
+atlas_Mixl1_tomato_pos$nr_cells <- nr_Mixl1_positive[colnames(atlas_Mixl1_tomato_pos)]
+atlas_Mixl1_tomato_neg <- atlas_sub[,colnames(atlas_sub)%in%chimeraMixl1_tomato_neg$closest.cell]
+atlas_Mixl1_tomato_neg$nr_cells <- nr_Mixl1_negative[colnames(atlas_Mixl1_tomato_neg)]
+sce_temp <- cbind(atlas_Mixl1_tomato_pos,atlas_Mixl1_tomato_neg)
+sce_temp$mapping <- c( rep("Mixl1 tomato pos",ncol(atlas_Mixl1_tomato_pos)),
+                      rep("Mixl1 tomato neg",ncol(atlas_Mixl1_tomato_neg)))
+atlas_sub$mapping <- "atlas"
+atlas_sub$nr_cells <- 1
+sce_temp <- sce_temp[,sample(1:ncol(sce_temp))]
+sce_temp_3 <- cbind(atlas_sce,sce_temp)
+  
+  
+p3 <- ggplot(mapping=aes(x=reducedDims(sce_temp_3)$umap[,1],
+                   y=reducedDims(sce_temp_3)$umap[,2],
+                   color=sce_temp_3$mapping,size=sce_temp_3$nr_cells)) + theme_classic(base_size=10)+ggtitle("Mixl1")+geom_jitter()+
+  scale_color_manual(values=c( "Mixl1 tomato neg"="darkblue","Mixl1 tomato pos"="red","atlas"="lightgrey"))+xlab("umap 1")+ylab("umap 2") + theme(legend.position = "none", legend.title=element_blank(),axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank(),legend.text=element_text(size=12)) 
+print(p3)
+```
+
+```{r mapping_Mixl1_chimeras_legend,dev='svg',dev='pdf'}
+legend_mapping_Mixl1_chimeras <- get_legend(p3)
+as_ggplot(legend_mapping_Mixl1_chimeras)
+```
+

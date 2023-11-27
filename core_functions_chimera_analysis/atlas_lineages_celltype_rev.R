@@ -4,7 +4,7 @@
 Celltype <- commandArgs(trailingOnly=TRUE)[1]#the final cell type of the lineage
 split_trajectory <- FALSE
 #split_trajectory <- as.logical(strtoi(commandArgs(trailingOnly=TRUE)[2])) #an additional
-# parameter used to split trajectories into sub-trajectories
+# parameter used to split trajectories into sub-trajectories, not used here
 
 set.seed(444)
 setwd("/nfs/research/marioni/magda/chimera/scripts_for_paper")
@@ -36,8 +36,8 @@ names(wot_scores_Celltype) <- wot_data$id
 
 
 ## --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Creating a list of the WOT scores per stage
-# Keeping the highest 5% of scores
+# Creating a list of the WOT scores per stage.
+# As a first step, we subset to the cells with the highest 5% of scores.
 stages_sub <- c("E9.25","E9.0","E8.75","E8.5","E8.25","E8.0","E7.75","E7.5")
 wot_scores_per_stage <- list()
 wot_scores_per_stage[[1]] <- NULL
@@ -50,7 +50,7 @@ names(wot_scores_per_stage) <- stages_sub
 
 
 ## --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#Identifying the cells that are part of the lineage by applying mixture modelling to the WOT scores
+#Identifying the cells that are part of the lineage by applying mixture modelling to the WOT scores (based on the highest 5% of WOT scores used above)
 library(mixsmsn)
 for (j in 2:length(stages_sub))
 {
@@ -68,7 +68,7 @@ for (j in 2:length(stages_sub))
 
 
 ## --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#discard cell types that do not constitute at least 10% of the cells of the lineage at any stage
+#Discarding cell types that do not constitute at least 10% of the cells of the lineage at any stage
 for (j in 2:length(stages_sub))
 { 
   temp <- table(atlas_meta$celltype.clustering[match(names( wot_scores_per_stage[[j]]), atlas_meta$cell)])
@@ -263,24 +263,25 @@ if (length(starting_cells) > 1 && split_trajectory){
 
 ## --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 yGenes=read.table("../data/ygenes.tab")
-# We exclude Xist and genes on the y chromosome
-# exclude <- c("ENSMUSG00000086503",yGenes)
-# httr::set_config(httr::config(ssl_verifypeer = FALSE))
-# ensembl = useMart("ensembl",dataset="mmusculus_gene_ensembl") 
-# genes.go <- getBM(attributes=c('hgnc_symbol', 'ensembl_gene_id', 'go_id'),
-#                    filters = 'go', values = list('GO:0007049'), mart = ensembl)
-# genes.go <- unique(genes.go$ensembl_gene_id)
-# 
-# library(GO.db)
-# library(org.Mm.eg.db)
-# results <- AnnotationDbi::select(org.Mm.eg.db, keys=c("GO:0007049"), columns = c('ENSEMBL'), keytype = "GOALL")
-# exclude <- unique(exclude,results$ENSEMBL)
+#We exclude Xist and genes on the y chromosome
+exclude <- c("ENSMUSG00000086503",yGenes)
+httr::set_config(httr::config(ssl_verifypeer = FALSE))
+ensembl = useMart("ensembl",dataset="mmusculus_gene_ensembl")
+genes.go <- getBM(attributes=c('hgnc_symbol', 'ensembl_gene_id', 'go_id'),
+                   filters = 'go', values = list('GO:0007049'), mart = ensembl)
+genes.go <- unique(genes.go$ensembl_gene_id)
 
-#saveRDS(exclude,file="exclude_genes_pseudotime.rds")
+library(GO.db)
+library(org.Mm.eg.db)
+results <- AnnotationDbi::select(org.Mm.eg.db, keys=c("GO:0007049"), columns = c('ENSEMBL'), keytype = "GOALL")
+exclude <- unique(exclude,results$ENSEMBL)
+
+saveRDS(exclude,file="exclude_genes_pseudotime.rds")
 
 exclude <- readRDS("exclude_genes_pseudotime.rds")
 
-#Computing diffusion pseudotimes
+#Computing and plotting diffusion maps
+
 atlas_sub_Celltype <- atlas_sce[,match(unlist(sapply(wot_scores_per_stage,names)),colnames(atlas_sce))]
 dpts <- list()
 library(destiny)
@@ -290,9 +291,10 @@ dir.create(Celltype)
 pseudotime_vecs <- vector(mode = "list", length = length(starting_cells))
 # preselect genes for pseudotime
 # need genes that are differential across different time points
-# we pick genes correlated with actual time
+# We use genes correlated with actual time, then perform a linear regression of gene expression on time. 
+# We then discard those genes whose residuals from this regression are correlated with batch, to avoid influence on batch effects on the diffusion map. 
 
-  exclude1 <- read.table("../data/spatial_genes.txt")$V1
+  exclude1 <- read.table("../data/spatial_genes.txt")$V1 #exclude the impact of spatial genes on diffusion map
   initial_celltypes_keep_no_tab <- sapply(initial_celltypes_keep,function(x) gsub(" ","_",x))
 for (j in 1:length(starting_cells)){
   saveRDS(c(starting_cells[[j]],names(ind_trajectory[ind_trajectory == j])),file=paste0(Celltype,"/",Celltype,"_cells_sublineage_",initial_celltypes_keep_no_tab[j],".rds"))
