@@ -9,6 +9,12 @@ library(pROC)
 library(ggrepel)
 
 
+#' @title find_dynamic_genes
+#' @param sce SingleCellExperiment including cells for one lineage, colData
+#' needs to include slot 'stage'
+#' @param excluded_genes genes to exclude from dynamic genes, by default NULL (none)
+#' @export
+#' @examples
 find_dynamic_genes <- function(sce,excluded_genes=NULL)
 {
   sce <- sce[,!(is.na(sce$stage))]
@@ -24,6 +30,8 @@ find_dynamic_genes <- function(sce,excluded_genes=NULL)
   sce <- sce[p_vals_res > 0.2,]
   return(sce)
   }
+
+
 
 compute_and_plot_pseudotime <- function(sce){
   dm <- DiffusionMap(t(as.matrix(logcounts(sce))),n_pcs=10)

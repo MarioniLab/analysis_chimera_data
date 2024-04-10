@@ -1,4 +1,5 @@
-#like 2020, but PCA space based on atlas only
+#This scripts maps each sample from the WT chimera to the atlas separately, using the mutual nearest neighbours method (Haghverdi , with principal components based on the reference atlas only, and not the chimera data set, in order to map the chimera cells based on the underlying structure of variation of the reference data set.
+
 sample <-  commandArgs(trailingOnly=TRUE)
 library(Matrix)
 library(scran)
