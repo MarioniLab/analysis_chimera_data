@@ -21,8 +21,6 @@ mapping_chimeras_to_atlas: scripts for mapping the chimera data to the reference
 
 Mesenchyme_subtyping: subtyping Mesenchyme cell type, detecting subtypes with signature of Juxta-cardiac-field
 
-Mixl1_chimera_analysis: applying perturbSuite_DE to the Epicardium lineage for the Mixl1 chimeras
-
 Mixl1_data_processing: cell calling and normalisation for Mixl1 chimeras
 
 perturbSuite_DA_chimeras: perturbSuite_DA applied to Mixl1 and T chimeras
