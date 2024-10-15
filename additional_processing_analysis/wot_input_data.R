@@ -1,4 +1,5 @@
-# This script extracts cells for each final cell type at E9.25 and stores them in gmt files for #input to WOT.
+# This script extracts cells for each final cell type at E9.25 and stores them in gmt files for 
+#input to WOT.
 
 atlas_meta  <- readRDS("../fromIvan_new_atlas/integrated_meta_celltype_clus.rds")
 atlas_meta <- atlas_meta[!(atlas_meta$stage%in%c("E9.5","mixed_gastrulation")),]

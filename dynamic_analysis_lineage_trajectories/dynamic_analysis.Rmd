@@ -1,5 +1,5 @@
 ---
-title: "Lineage analysis with correlation pseudotime"
+title: "Dynamic analysis of progression along linaege trajectory"
 author: "Magdalena Strauss"
 output:
   html_document:
@@ -8,7 +8,7 @@ output:
     keep_md: yes 
 ---
   
-This notebook computes dynamic shifts caused by T and Mixl1 knockouts for chimeric mouse embryoes. 
+This notebook computes dynamic shifts caused by T and Mixl1 knockouts for chimeric mouse embryos (COSICC_kinetics). 
 
 ```{r}
 library(scran)
@@ -17,9 +17,9 @@ knitr::opts_chunk$set(
     echo = FALSE,
     message = FALSE,
     warning = FALSE,
-    message = FALSE,
-    dev = c("pdf"),
-    dpi=300
+    message = FALSE#,
+    #dev = c("pdf"),
+    #dpi=300
 )
 ```
 
@@ -39,15 +39,13 @@ correlation_pseudotime_WT <- correlation_pseudotime_WT[unlist(lapply(correlation
 correlation_pseudotime_Mixl1 <- correlation_pseudotime_Mixl1[unlist(lapply(correlation_pseudotime_Mixl1, function(x) !(is.null(x))))]
 ```
 
-We perform the tests for lineages for which there is not much depletion of tomato positive cells (the lineage has an odds ratio of at least 0.5). We mark all the lineages with higher depletion levels. 
+We perform the tests for lineages for which there is limited depletion of tomato positive cells (the lineage has an odds ratio of at least 0.5). 
 
 ```{r}
 DT_T <- readRDS("diff_trajectories_T_rev.rds")
 DT_Mixl1 <- readRDS("diff_trajectories_Mixl1_rev.rds")
 correlation_pseudotime_Mixl1 <- correlation_pseudotime_Mixl1[intersect(names(correlation_pseudotime_Mixl1),DT_Mixl1$trajectory[DT_Mixl1$odds_ratio>0.5])]
-depleted_Mixl1 <- DT_Mixl1$trajectory[DT_Mixl1$odds_ratio<= 0.25]
 correlation_pseudotime_T <-correlation_pseudotime_T[intersect(names(correlation_pseudotime_T),DT_T$trajectory[DT_T$odds_ratio>0.5])]
-depleted_T <- DT_T$trajectory[DT_T$odds_ratio<= 0.25]
 ```
 
 ```{r density_Mixl1}
@@ -58,7 +56,8 @@ for (j in 1:length(correlation_pseudotime_Mixl1))
     geom_density(position = "identity",alpha=0.4) + scale_fill_manual(values=c("darkblue","darkred")) +
     xlab("pseudotime") + ggtitle(paste0("Mixl1 chimera, lineage: ",names(correlation_pseudotime_Mixl1)[j]))+ guides(fill=guide_legend(title="tomato")) + 
                                    theme_classic(base_size=12)+theme(legend.position = "bottom")
-  #print(p_Mixl1)
+ # print(p_Mixl1) #uncomment to plot the distribution of pseudotimes along the lineage trajectory, 
+  #coloured by tdTomato (pos. versus negative)
 }
 ```
 
@@ -70,7 +69,8 @@ for (j in 1:length(correlation_pseudotime_T))
     geom_density(position = "identity",alpha=0.4) + scale_fill_manual(values=c("darkblue","darkred")) +
     xlab("pseudotime") + ggtitle(paste0("T chimera, lineage: ",names(correlation_pseudotime_T)[j]))+ guides(fill=guide_legend(title="tomato")) + 
                                    theme_classic(base_size=12)+theme(legend.position = "bottom")
-  #print(p_T)
+  #print(p_T)  #uncomment to plot the distribution of pseudotimes along the lineage trajectory, 
+  #coloured by tdTomato (pos. versus negative
 }
 ```
 ```{r density_WT}
@@ -81,11 +81,12 @@ for (j in 1:length(correlation_pseudotime_WT))
     geom_density(position = "identity",alpha=0.4) + scale_fill_manual(values=c("darkblue","darkred")) +
     xlab("pseudotime") + ggtitle(paste0("WT chimera, lineage: ",names(correlation_pseudotime_WT)[j]))+ guides(fill=guide_legend(title="tomato")) + 
                                    theme_classic(base_size=12)+theme(legend.position = "bottom")
-  #print(p_WT)
+  #print(p_WT)  #uncomment to plot the distribution of pseudotimes along the lineage trajectory, 
+  #coloured by tdTomato (pos. versus negative
 }
 ```
 
-We compute the Wilcoxon statistics
+We compute the Wilcoxon statistics.
 
 ```{r }
 df <- data.frame(lower_bound = rep(NA,length(correlation_pseudotime_Mixl1)),upper_bound= rep(NA,length(correlation_pseudotime_Mixl1)),
@@ -102,6 +103,7 @@ df$p_value <- p.adjust(df$p_value)
 rownames(df) <- names(correlation_pseudotime_Mixl1)
 saveRDS(df,file="results_no_split/Wilcoxon_Mixl1.rds")
 ```
+
 
 ```{r}
 df <- data.frame(lower_bound = rep(NA,length(correlation_pseudotime_T)),upper_bound= rep(NA,length(correlation_pseudotime_T)),
@@ -161,7 +163,8 @@ ggplot(Wilcoxon_stats_Mixl1,aes(x=location_WT,y=estimate,label=lineage,color=sig
   scale_x_continuous(limits=c(min(Wilcoxon_stats_Mixl1$estimate*1.2),max(Wilcoxon_stats_Mixl1$estimate*1.2))) + theme_bw()+ ggrepel::geom_text_repel(data=Wilcoxon_stats_Mixl1[Wilcoxon_stats_Mixl1$sig,], 
                              aes(x=location_WT, y=estimate, label=lineage), max.overlaps=Inf, size=4) + scale_color_manual(values=c("FALSE"="grey","TRUE"="darkred")) + labs(colour="significant")
 ```
-Plotting significant shifts in the trajectory dynamics 
+
+Plotting significant shifts in the lineage trajectory dynamics 
 
 ```{r Wilcoxon_stats_Mixl1_2,fig.height=1.4,fig.width=7}
 sig <- rep(FALSE,nrow(Wilcoxon_stats_Mixl1))
@@ -367,7 +370,7 @@ ggplot(ab,mapping=aes(y=celltype,x=type,fill=value)) + geom_raster() +
   scale_fill_manual(values=c("not_included" = "white","not significant" = "grey","down"="red","up"="darkblue"))+ylab("")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
 
-Saving the differential abudance and perturbSuite_kinetics results as .csv tables. 
+Saving the differential abudance and COSICC_kinetics results as .csv tables. 
 
 ```{r}
 write.table(da_celltypes_T,"DA_celltype_T.csv",sep=",",col.names=TRUE,row.names=FALSE)

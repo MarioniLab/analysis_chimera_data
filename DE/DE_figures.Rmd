@@ -1,0 +1,167 @@
+---
+title: "Plotting differential expression results"
+bibliography: bibliography.bib
+output:
+   BiocStyle::html_document:
+      code_folding: hide
+      number_sections: yes
+      toc: yes  
+---
+
+This notebook prints volcano plots of differential expression (DE) results obtained using
+a mixed modelling approach (@nebula), and testing test for DE between tdTom+ and tdTom- 
+cells in the knockout chimeras, contrasted with the same change in the WT chimeras
+
+
+# Set-up and loading DE results
+
+
+```{r, echo=FALSE, output=FALSE, message=FALSE}
+
+knitr::opts_chunk$set(
+    echo = FALSE,
+    message = FALSE,
+    warning = FALSE,
+    message = FALSE,
+    cache=FALSE#,
+    #dev = c("pdf"),
+    #dpi=300
+)
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(ggrepel))
+```
+
+
+# Overview plots
+
+```{r}
+all_Mixl1 <- read.table("markers_DE_celltype/Mixl1_DE.csv",sep=",",header=TRUE)
+all_T <- read.table("markers_DE_celltype/T_DE.csv",sep=",",header=TRUE)
+table(all_Mixl1$cell_type)
+table(all_T$cell_type)
+```
+
+
+## Plotting number of DE genes
+
+We plot the number of significantly DE genes across different cell types. Note that significance depends on cell numbers, and therefore smaller cell types are less likely to have significantly DE genes. 
+
+## For the T chimeras
+
+```{r nr_DE_T,fig.height=4,fig.width=4}
+nr_DE_genes_T <- as.data.frame(table(all_T$cell_type))
+nr_DE_genes_T_top <- nr_DE_genes_T[order(nr_DE_genes_T$Freq,decreasing=T)[1:8],]
+nr_DE_genes_T_top$Var1 <- factor(nr_DE_genes_T_top$Var1,levels=nr_DE_genes_T_top$Var1)
+ggplot(nr_DE_genes_T_top,aes(x=Var1,y=Freq)) + geom_bar(stat="identity") + theme_classic()+
+  xlab("") + ylab("nr. of DE genes") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+## For the Mixl1 chimeras
+
+```{r nr_DE_Mixl1,fig.height=4,fig.width=4}
+nr_DE_genes_Mixl1 <- as.data.frame(table(all_Mixl1$cell_type))
+nr_DE_genes_Mixl1_Top <- nr_DE_genes_Mixl1[order(nr_DE_genes_Mixl1$Freq,decreasing=T)[1:8],]
+nr_DE_genes_Mixl1_Top$Var1 <- factor(nr_DE_genes_Mixl1_Top$Var1,levels=nr_DE_genes_Mixl1_Top$Var1)
+ggplot(nr_DE_genes_Mixl1_Top,aes(x=Var1,y=Freq)) + geom_bar(stat="identity") + theme_classic()+
+  xlab("") + ylab("nr. of DE genes") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+# Volcano plots 
+
+For a number of specific cell types, we illustrate the DE genes using volcano plots. 
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+imprinted_genes <- read.table("list_imprinted_genes_Santini_et_al.csv",sep=",")$V1
+volcano_plot <- function(vector_FDR,vector_effect_sizes,thresh_FDR=0.1,max_highlight=50,
+                         x_label="coefficient",title=""){
+    df <- data.frame(FDR=vector_FDR,effect=vector_effect_sizes,gene=names(vector_FDR))
+    df <- df[complete.cases(df),]
+    rownames(df) <- df$gene
+    df$sig <- "not significant"
+    df$sig[df$FDR<thresh_FDR] <- "significant"
+    max_highlight <- min(sum(df$FDR<0.1),max_highlight)
+    highlight <- df$FDR < thresh_FDR &((df$effect > 0 & df$effect >= sort(df$effect[df$FDR<thresh_FDR],decreasing=TRUE)[max_highlight])|(df$effect < 0 & df$effect <= sort(df$effect[df$FDR <thresh_FDR],decreasing=FALSE)[max_highlight]))
+    highlight[highlight & (df$effect > 0)] <- "up"
+    highlight[highlight==TRUE & (df$effect < 0)] <- "down"
+    df$highlight <- highlight
+    df$highlight[df$gene%in%imprinted_genes & df$highlight!="FALSE"] <- "imprinted"
+    df$sig[df$sig=="significant" & df$effect < 0] <- "down"
+    df$sig[df$sig=="significant" & df$effect > 0] <- "up"
+    df$sig[df$highlight == "imprinted"] <- "imprinted"
+    pp <- ggplot(df, aes(x=effect, y=-log10(FDR),color=sig)) +
+        geom_point(size=5, alpha=0.1) +
+        ggtitle(title) + scale_color_manual(values=c("FALSE"="grey","up"="darkblue","down"="darkred","imprinted"="purple"))+
+        labs(y=expression('-Log'[10]*' FDR'), x=x_label) +
+        theme_classic(base_size=12) +
+        theme(legend.position="none", plot.title = element_text(size = rel(1), hjust = 0.5))+
+        geom_text_repel(data=df[!(highlight==FALSE),],
+                        aes(x = effect, y = -log10(FDR),label=gene),max.overlaps=100,
+                        segment.color = 'transparent')+
+        scale_y_continuous(trans=scales::pseudo_log_trans(sigma=1.1,base = 1.7))+
+        scale_x_continuous(trans=scales::pseudo_log_trans(sigma=1.1,base = 1.1))+
+        geom_hline(yintercept = 1) + xlim(c(-0.3+min(df$effect[df$highlight=="down"]),0.3+max(df$effect[df$highlight=="up"])))
+    return(pp)
+
+}
+
+wrapper_volcano_plot <- function(path_to_file_name, target, cell_type){
+  res <- read.table(path_to_file_name,sep=",",header=TRUE)
+  # occassionally a duplicated name resulting from conversion to gene names, e.g.Dohh
+  res$DE_gene_name[duplicated(res$DE_gene_name)] <- paste0(res$DE_gene_name[duplicated(res$DE_gene_name)],"_1")
+  vector_FDR <- res$FDR
+  vector_effect_sizes=res$logFC_target_tomatoTRUE
+  names(vector_FDR) <- res$DE_gene_name
+  names(vector_effect_sizes) <- res$DE_gene_name
+  print(volcano_plot(vector_FDR,vector_effect_sizes,thresh_FDR=0.1,max_highlight=22,
+                           x_label="logFC",title=paste(target," - ",cell_type)))
+}
+```
+
+## T
+
+```{r T_LPM, fig.width=5,fig.height=4}
+wrapper_volcano_plot("markers_DE_celltype/Lateral_plate_mesoderm_T_DE.csv","T","LPM")
+```
+
+```{r T_LM, fig.width=5,fig.height=3}
+wrapper_volcano_plot("markers_DE_celltype/Limb_mesoderm_T_DE.csv","T","Limb mesoderm")
+```
+```{r T_NMPs_mesoderm_biased, fig.width=7,fig.height=4.5}
+wrapper_volcano_plot("markers_DE_celltype/NMPs_Mesoderm-biased_T_DE.csv","T","NMPs mesoderm biased")
+```
+```{r T_NMPs, fig.width=5,fig.height=3}
+wrapper_volcano_plot("markers_DE_celltype/NMPs_T_DE.csv","T","NMPs")
+```
+```{r T_intermdiate_mesoderm, fig.width=5,fig.height=3}
+wrapper_volcano_plot("markers_DE_celltype/Intermediate_mesoderm_T_DE.csv","T","Intermediate mesoderm")
+```
+
+## Mixl1
+
+```{r Mixl1_LPM, fig.width=5,fig.height=3}
+wrapper_volcano_plot("markers_DE_celltype/Lateral_plate_mesoderm_Mixl1_DE.csv","Mixl1","LPM")
+```
+```{r Mixl1_Mesenchyme, fig.width=8,fig.height=6}
+wrapper_volcano_plot("markers_DE_celltype/Mesenchyme_Mixl1_DE.csv","Mixl1","Mesenchyme")
+```
+```{r Mixl1_Blood_progenitors, fig.width=7,fig.height=5}
+wrapper_volcano_plot("markers_DE_celltype/Blood_progenitors_Mixl1_DE.csv","Mixl1","Blood_progenitors")
+```
+
+```{r Mixl1_Ery, fig.width=10,fig.height=7}
+wrapper_volcano_plot("markers_DE_celltype/Erythroid_Mixl1_DE.csv","Mixl1","Erythroid")
+```
+
+```{r Mixl1_PST, fig.width=6,fig.height=4}
+wrapper_volcano_plot("markers_DE_celltype/Posterior_somitic_tissues_Mixl1_DE.csv","Mixl1","Posterior_somitic_tissues")
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
+# References

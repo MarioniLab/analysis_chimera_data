@@ -2,13 +2,13 @@
 title: "Differential abundance analysis on cell type and trajectory level"
 author: "Magdalena Strauss"
 output:
-  html_document:
-    number_sections: yes
-    toc: yes  
-    keep_md: yes
+   BiocStyle::html_document:
+      code_folding: hide
+      number_sections: yes
+      toc: yes  
 ---
 
-This script performs differential abundance analysis for the T and Mixl1 chimera datasets on a cell type and trajectory level. 
+This script performs differential abundance analysis for the T and Mixl1 chimera datasets on a cell type and lineage trajectory level. 
 
 ```{r}
 set.seed(44)
@@ -16,17 +16,17 @@ knitr::opts_chunk$set(
     echo = FALSE,
     message = FALSE,
     warning = FALSE,
-    message = FALSE,
-    fig.path = "plots_differential_abundance/",
-    dev = c("pdf"),
-    dpi=300
+    message = FALSE#,
+    #fig.path = "plots_differential_abundance/",
+   # dev = c("pdf"),
+    #dpi=300
 )
 library(ggthemes)
-source("core_functions_DA_testing.R")
-source("chimera_core_functions_big_atlas.R")
+suppressPackageStartupMessages(source("core_functions_DA_testing.R"))
+suppressPackageStartupMessages(source("chimera_core_functions_big_atlas.R"))
 ```
 
-Reading in of WOT scores 
+Reading in of Waddington-OT scores 
 
 ```{r}
 library(data.table)
@@ -40,7 +40,7 @@ wot_data <- wot_data[intersect(colnames(wot_data),columns.keep)]
 Loading the chimera data sets. 
 
 ```{r}
-cells_exclude <- sum(grepl("ExE",atlas_meta$celltype.clustering))
+cells_exclude <- sum(grepl("ExE",atlas_meta$celltype.clustering))#excluding extra-embryonic tissues
 chimeraT <- readRDS("../results/chimeraT_2020_extended_mapping_rev.rds")
 chimeraWT <- readRDS("../results/chimeraWT_2020_extended_mapping_rev.rds")
 chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
@@ -48,7 +48,7 @@ chimeraMixl1 <- readRDS("../results/chimeraMixl1_2020_extended_mapping_rev.rds")
 
 # Plotting mapped stages
 
-For supplementary figure
+The following plots are for Supplementary Figure 1. 
 
 ```{r plot_mapped_stage_Mixl1,fig.height=2,fig.width=4}
 plot_stage(chimeraMixl1,saveFileName="plot_stage_Mixl1_rev.pdf",target="Mixl1",scale="relative") 
@@ -65,7 +65,7 @@ plot_stage(chimeraWT,saveFileName="plot_stage_WT_rev.pdf",target="WT",scale="rel
 
 # Plotting cell types
 
-For supplementary figure
+For Supplementary Figure 1. 
 
 ```{r plot_celltype_Mixl1,fig.height=12,fig.width=8.5}
 plot_celltypes(chimeraMixl1,saveFileName="plot_celltype_Mixl1_rev.pdf",target="Mixl1") 
@@ -80,10 +80,16 @@ plot_celltypes(chimeraWT,saveFileName="plot_celltype_WT_rev.pdf",target="WT")
 ```
 
 
-
 # Differential abundance per celltype
 
-Cell type-based differential abundance testing is performed to determine which cell types are depleted or enriched by T or Mixl1 knockout.
+Cell type-based differential abundance testing (COSICC_group) is performed to determine which cell types are depleted or enriched by T or Mixl1 knockout.
+
+## Mixl1
+
+```{r plot_DA_celltypes_Mixl1,fig.width=8.5,fig.retina=1.05,fig.height=7.5}
+da_celltypes_Mixl1 <- da_per_celltype(chimeraMixl1,chimeraWT, "Mixl1")
+saveRDS(da_celltypes_Mixl1,file="da_celltypes_Mixl1_rev.rds")
+```
 
 ## T
 
@@ -91,6 +97,8 @@ Cell type-based differential abundance testing is performed to determine which c
 da_celltypes_T <- da_per_celltype(chimeraT,chimeraWT, "T")
 saveRDS(da_celltypes_T,file="da_celltypes_T_rev.rds")
 ```
+
+Replotting the figure for T in a different layout.
 
 ```{r plot_DA_celltypes_T,fig.width=10,fig.height=6.5}
 da_celltypes_T <- readRDS("da_celltypes_T_rev.rds")
@@ -118,38 +126,14 @@ print(p)
 ```
 
 
-## Mixl1
+## DA without correcting for experimental bias
 
-```{r plot_DA_celltypes_Mixl1,fig.width=8.5,fig.retina=1.05,fig.height=7.5}
-da_celltypes_Mixl1 <- da_per_celltype(chimeraMixl1,chimeraWT, "Mixl1")
-saveRDS(da_celltypes_Mixl1,file="da_celltypes_Mixl1_rev.rds")
-```
-
-To compare, we repeat the celltype-based differential abundance without normalising (supplementary figure)
+To compare, we repeat the celltype-based differential abundance without the bias correction implemented in COSICC_group.
 
 ```{r da_without_normalising,fig.width=10,fig.retina=1.05,fig.height=4}
 da_celltypes_T_without_normalising <- da_per_celltype_without_normalising(chimeraT,chimeraWT, "T")
 da_celltypes_T_without_normalising[order(da_celltypes_T_without_normalising$celltype),]
 ```
-
-# Differential abundance per celltype using the 2020 celltype annotations 
-
-```{r}
-chimeraT_2020 <- readRDS("chimeraT_original_mapping.rds")
-chimeraWT_2020 <- readRDS("chimeraWT_original_mapping.rds")
-chimeraT_2020 <- chimeraT_2020[,chimeraT_2020$stage=="E8.5"]
-chimeraWT_2020 <- chimeraWT_2020[,chimeraWT_2020$stage=="E8.5"]
-yy <- complete.cases(reducedDims(chimeraWT_2020)$pca.corrected.E8.5)
-chimeraWT_2020 <- chimeraWT_2020[, yy]
-yy <- complete.cases(reducedDims(chimeraT_2020)$pca.corrected.E8.5)
-chimeraT_2020 <- chimeraT_2020[,yy]
-```
-
-```{r da_per_celltype_2020,fig.width=9,fig.retina=1.05,fig.height=3}
-da_celltypes_T_2020 <- da_per_celltype(chimeraT_2020,chimeraWT_2020, "T_2020")
-da_celltypes_T_2020[order(da_celltypes_T_2020$celltype),]
-```
-
 
 
 # Differential abundance per celltype and stage
@@ -162,7 +146,7 @@ da_per_celltype_per_stage_T <- da_per_celltype_per_stage(chimeraT,chimeraWT, "T"
 
 ```
 
-Subsetting the plot to cell types found significant overall and related lineages
+Subsetting the plot to cell types found significant differentially abundant overall and related lineages
 
 ```{r DA_celltype_stage_T_relevant_celltypes,fig.width=9,fig.retina=1,fig.height=6}
 da_per_celltype_per_stage_T <- da_per_celltype_per_stage(chimeraT,chimeraWT, "T",stages=c("E7.75","E8.0",
@@ -188,8 +172,9 @@ da_per_celltype_per_stage_Mixl1 <- da_per_celltype_per_stage(chimeraMixl1,chimer
                       "Blood progenitors", unique(atlas_meta$celltype.clustering)[grepl("Cardio",atlas_meta$celltype.clustering)]))
 ```
 
-# Differential abundance for trajectories
+# Differential abundance for lineage trajectories
 
+Here we apply COSICC_DA_lineage_trajectory to identify lineage trajectories that are enriched or depleted for Mixl1 or T knockout. 
 
 ```{r}
 wot_data <- wot_data[wot_data$id %in% atlas_meta$cell[!(as.vector(atlas_meta$stage) %in% c("E9.25", "E9.5","mixed_gastrulation"))],]
@@ -205,7 +190,7 @@ wot_data <- wot_data[,-1]
 ```
 
 
-For Mixl1
+For Mixl1 knockout
 
 ```{r,fig.width=10,fig.retina=1,fig.height=5}
 DT_Mixl1 <- differential_fate_probability(chimeraMixl1,chimeraWT,"Mixl1",wot_data)
@@ -237,7 +222,7 @@ p <- ggplot( fisher_test_lineages , aes(x=log10(odds_ratio), y=-log10(p_values+1
 print(p)
 ```
 
-For T
+For T knockout
 
 ```{r,fig.retina=1.05,fig.height=5,fig.width=10}
 DT_T <- differential_fate_probability(chimeraT,chimeraWT,"T",wot_data)
@@ -271,6 +256,8 @@ print(p)
 
 
 # Comparing differential abundance per trajectory versus differential abuncance per celltype
+
+The plots below illustrate a comparison between abundance of cell type versus abundance of the lineage trajectory leading to the cell type. 
 
 ## Mixl1
 
@@ -396,3 +383,153 @@ scale_x_continuous(expand = c(0, 0),limits=c(0,3),trans=scales::pseudo_log_trans
 ```
 
 
+# Per-celltype differential abundance testing - checking replicate consistency
+
+We now run differential abundance analysis for cell types separately for each individual pool and compare the results (Supplementary Figure 6).
+
+## T
+
+```{r ,fig.width=14,fig.retina=1.05,fig.height=6,eval=FALSE}
+pools_T <- unique(chimeraT$pool)
+da_celltypes_T_replicates <- list()
+for (j in 1:length(pools_T)){
+  sce_temp <- chimeraT[,chimeraT$pool==pools_T[j]]
+  da_celltypes_T_replicates[[j]] <- da_per_celltype(sce_temp,chimeraWT, paste0("T_pool_",toString(pools_T[j])))
+}
+
+celltypes <- unlist(lapply(da_celltypes_T_replicates,function(x) x$celltype))
+celltypes <- names(table(celltypes))[table(celltypes) == max(table(celltypes))]
+sig <- do.call(cbind,lapply(da_celltypes_T_replicates,function(x) x$sig[match(celltypes,x$celltype)]))
+sig <- cbind(sig,da_celltypes_T$sig[match(celltypes,da_celltypes_T$celltype)])
+rownames(sig) <- celltypes
+colnames(sig) <- c(sapply(pools_T,toString),"combined")
+
+odds_ratio <- do.call(cbind,lapply(da_celltypes_T_replicates,function(x) x$odds_ratio[match(celltypes,x$celltype)]))
+odds_ratio <- cbind(odds_ratio,da_celltypes_T$odds_ratio[match(celltypes,da_celltypes_T$celltype)])
+rownames(odds_ratio) <- celltypes
+colnames(odds_ratio) <- c(sapply(pools_T,toString),"combined")
+```
+
+```{r,eval=FALSE}
+sig
+write.table(sig,file="sig_T_rev.csv",col.names=TRUE,row.names=FALSE,sep=",",quote=FALSE)
+```
+
+```{r,eval=FALSE}
+odds_ratio
+write.table(odds_ratio,file="odds_ratio_T_rev.csv",col.names=TRUE,row.names=TRUE,sep=",",quote=FALSE)
+
+```
+
+We compare the odds ratios computed for each pool.
+
+```{r}
+odds_ratio_T <- read.table("odds_ratio_T_rev.csv",sep=",",header=TRUE)
+```
+
+```{r heatmap_pools_T, fig.height=10}
+odds_ratio_T <- read.table("odds_ratio_T_rev.csv",header=TRUE,sep=",")
+library(pheatmap)
+myBreaks <- c(seq(min(odds_ratio_T), 1, length.out=10), 
+              seq(1+max(odds_ratio_T)/20, max(odds_ratio_T), length.out=10))
+pheatmap(odds_ratio_T,color=colorRampPalette(c("Darkblue", "white","red"))(20),breaks=myBreaks)
+```
+
+We compute the Spearman rank correlations between the odds ratios.  
+
+```{r corr_odds_ratios_pools_T}
+pheatmap(cor(odds_ratio_T,method="spearman"),breaks=seq(0,1,by=0.01))
+```
+
+We subset to those cell types that are significant for at least one pool or the combined data set. 
+
+```{r}
+sig_T <- read.table("sig_T_rev.csv",sep=",",header=TRUE)
+odds_ratio_T_sub <- odds_ratio_T[apply(sig_T,1,function(x) any(!(x=="not significant"))),]
+```
+
+```{r heatmap_pools_T_sub, fig.height=10}
+
+myBreaks <- c(seq(min(odds_ratio_T_sub), 1, length.out=10), 
+              seq(1+max(odds_ratio_T_sub)/20, max(odds_ratio_T_sub), length.out=10))
+pheatmap(odds_ratio_T_sub,color=colorRampPalette(c("Darkblue", "white","red"))(20),breaks=myBreaks)
+```
+
+We compute the Spearman rank correlations between the odds ratios.  
+
+```{r corr_odds_ratios_pools_T_sub}
+pheatmap(cor(odds_ratio_T_sub,method="spearman"),breaks=seq(0,1,by=0.01))
+```
+
+## Mixl1
+
+We repeat the above for the Mixl1 chimera data sets. 
+
+```{r ,fig.width=14,fig.retina=1.05,fig.height=6,eval=FALSE}
+chimeraMixl1$pool <- floor(chimeraMixl1$sample/2+0.5)
+pools_Mixl1 <- unique(chimeraMixl1$pool)
+da_celltypes_Mixl1_replicates <- list()
+chimeraMixl1$tomato <- as.logical(chimeraMixl1$tomato)
+for (j in 1:length(pools_Mixl1)){
+  sce_temp<- chimeraMixl1[,chimeraMixl1$pool==pools_Mixl1[j]]
+  da_celltypes_Mixl1_replicates[[j]] <- da_per_celltype(sce_temp,chimeraWT, paste0("Mixl1_pool_",toString(pools_Mixl1[j])))
+}
+
+celltypes <- unlist(lapply(da_celltypes_Mixl1_replicates,function(x) x$celltype))
+celltypes <- names(table(celltypes))[table(celltypes) == max(table(celltypes))]
+sig <- do.call(cbind,lapply(da_celltypes_Mixl1_replicates,function(x) x$sig[match(celltypes,x$celltype)]))
+sig <- cbind(sig,da_celltypes_Mixl1$sig[match(celltypes,da_celltypes_Mixl1$celltype)])
+rownames(sig) <- celltypes
+colnames(sig) <- c(sapply(pools_Mixl1,toString),"combined")
+
+odds_ratio <- do.call(cbind,lapply(da_celltypes_Mixl1_replicates,function(x) x$odds_ratio[match(celltypes,x$celltype)]))
+odds_ratio <- cbind(odds_ratio,da_celltypes_Mixl1$odds_ratio[match(celltypes,da_celltypes_Mixl1$celltype)])
+rownames(odds_ratio) <- celltypes
+colnames(odds_ratio) <- c(sapply(pools_Mixl1,toString),"combined")
+```
+
+```{r,eval=FALSE}
+sig
+write.table(sig,file="sig_Mixl1_rev.csv",col.names=TRUE,row.names=FALSE,quote=FALSE,sep=",")
+```
+
+```{r,eval=FALSE}
+odds_ratio
+write.table(odds_ratio,file="odds_ratio_Mixl1_rev.csv",col.names=TRUE,row.names=FALSE,quote=FALSE,sep=",")
+```
+
+```{r}
+odds_ratio_Mixl1 <- read.table("odds_ratio_Mixl1_rev.csv",sep=",",header=TRUE)
+```
+
+```{r heatmap_pools_Mixl1, fig.height=10}
+odds_ratio_Mixl1 <- read.table("odds_ratio_Mixl1_rev.csv",header=TRUE,sep=",")
+library(pheatmap)
+myBreaks <- c(seq(min(odds_ratio_Mixl1), 1, length.out=10), 
+              seq(1+max(odds_ratio_Mixl1)/20, max(odds_ratio_Mixl1), length.out=10))
+pheatmap(odds_ratio_Mixl1,color=colorRampPalette(c("Darkblue", "white","red"))(20),breaks=myBreaks)
+```
+
+We compute the Spearman rank correlations between the odds ratios. 
+
+```{r corr_odds_ratios_pools}
+pheatmap(cor(odds_ratio_Mixl1,method="spearman"),breaks=seq(0,1,by=0.01))
+```
+
+We subset to those genes that are significant for at least one pool or the combined data set. 
+
+```{r}
+sig_Mixl1 <- read.table("sig_Mixl1_rev.csv",sep=",",header=TRUE)
+odds_ratio_Mixl1_sub <- odds_ratio_Mixl1[apply(sig_Mixl1,1,function(x) any(!(x=="not significant"))),]
+```
+
+```{r heatmap_pools_Mixl1_sub, fig.height=10}
+
+myBreaks <- c(seq(min(odds_ratio_Mixl1_sub), 1, length.out=10), 
+              seq(1+max(odds_ratio_Mixl1_sub)/20, max(odds_ratio_Mixl1_sub), length.out=10))
+pheatmap(odds_ratio_Mixl1_sub,color=colorRampPalette(c("Darkblue", "white","red"))(20),breaks=myBreaks)
+```
+
+```{r corr_odds_ratios_pools_Mixl1_sub}
+pheatmap(cor(odds_ratio_Mixl1_sub,method="spearman"),breaks=seq(0,1,by=0.01))
+```
