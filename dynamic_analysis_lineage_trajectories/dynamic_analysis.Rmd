@@ -1,5 +1,5 @@
 ---
-title: "Dynamic analysis of progression along linaege trajectory"
+title: "Dynamic analysis of progression along lineage trajectory"
 author: "Magdalena Strauss"
 output:
   html_document:
