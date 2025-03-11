@@ -1,9 +1,8 @@
-This repository contains the code used to produce the results and figures for the following preprint:
+This repository contains the code used to produce the results and figures for the following publication:
 
 
-Strauss, Magdalena E., Mai-Linh Nu Ton, Samantha Mason, ..., Berthold Gottgens, John C. Marioni, and Carolina Guibentif. 2023. 
-Bespoke single cell molecular and tissue-scale analysis reveals mechanisms underpinning development and disease in complex developing cell populations. 
-bioRxiv. https://doi.org/10.1101/2023.10.11.561904
+Strauss, Magdalena E., Mai-Linh Nu Ton, Samantha Mason, ..., Berthold Gottgens, John C. Marioni, and Carolina Guibentif. 2024. 
+A single cell and tissue-scale analysis suite resolves Mixl1's role in heart development. iScience (accepted).
 
 
 The scripts are organised into folders as follows:
