@@ -1,7 +1,7 @@
 This repository contains the code used to produce the results and figures for the following publication:
 
 
-Strauss, Magdalena E., Mai-Linh Nu Ton, Samantha Mason, ..., Berthold Gottgens, John C. Marioni, and Carolina Guibentif. 2024. 
+Strauss, Magdalena E., Mai-Linh Nu Ton, Samantha Mason, ..., Berthold Gottgens, John C. Marioni, and Carolina Guibentif. 2025. 
 A single cell and tissue-scale analysis suite resolves Mixl1's role in heart development. iScience (accepted).
 
 
@@ -10,7 +10,7 @@ The scripts are organised into folders as follows:
 
 additional_processing_analysis: additional work not covered by the other folders
 
-AML: code to reproduce results on AML patient data (Fig. 5 in preprint)
+AML: code to reproduce results on AML patient data 
 
 core_functions_chimera_analysis: R scripts containing core functions to run perturbSuite for the chimera data sets, 
 
